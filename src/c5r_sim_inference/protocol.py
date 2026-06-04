@@ -12,6 +12,8 @@ METADATA_KEY = b"c5r_sim"
 
 @dataclass(frozen=True)
 class NewSimRequest:
+    """Decoded request to create a new simulation stream."""
+
     task_id: str
     initial_state: np.ndarray
     views: tuple[str, ...]
@@ -22,6 +24,8 @@ class NewSimRequest:
 
 @dataclass(frozen=True)
 class ActionBatchRequest:
+    """Decoded request to apply a batch of actions to an existing simulation."""
+
     sim_id: str
     start_step_index: int
     actions: np.ndarray
@@ -29,6 +33,8 @@ class ActionBatchRequest:
 
 @dataclass(frozen=True)
 class ObservationBatch:
+    """Decoded simulation observations returned by the server."""
+
     sim_id: str
     step_indices: np.ndarray
     view_names: tuple[str, ...]
@@ -41,6 +47,12 @@ class ObservationBatch:
 def fixed_shape_tensor_array(
     values: np.ndarray, *, value_shape: tuple[int, ...], name: str
 ) -> pa.FixedShapeTensorArray:
+    """Wrap a batched NumPy tensor as an Arrow fixed-shape tensor array.
+
+    ``values`` must have a leading row dimension followed by ``value_shape``.
+    The helper preserves contiguous arrays and only copies the Arrow-incompatible
+    single-row zero-stride view produced by patterns like ``array[None, ...]``.
+    """
     if not isinstance(values, np.ndarray):
         raise TypeError(f"{name} must be a numpy.ndarray")
     expected_rank = len(value_shape) + 1
@@ -58,6 +70,7 @@ def fixed_shape_tensor_array(
 
 
 def fixed_shape_tensor_to_numpy(values: pa.Array, *, name: str) -> np.ndarray:
+    """Convert an Arrow fixed-shape tensor array back to a contiguous ndarray."""
     if not isinstance(values, pa.FixedShapeTensorArray):
         raise ValueError(f"{name} must be a fixed-shape tensor array")
     if values.null_count:
@@ -77,6 +90,12 @@ def new_sim_batch_to_record_batch(
     height: int,
     substeps: int,
 ) -> pa.RecordBatch:
+    """Build a standalone ``new_sim`` record batch.
+
+    This form is useful for protocol tests and non-stream transports. The live
+    Flight client uses ``client_request_new_sim_batch_to_record_batch`` so all
+    request batches on one exchange share a schema.
+    """
     _require_non_empty_string(task_id, name="task_id")
     views = _metadata_views({"views": views}, default_if_missing=False)
     width = _positive_int(width, name="width")
@@ -113,6 +132,7 @@ def new_sim_batch_to_record_batch(
 
 
 def record_batch_to_new_sim(batch: pa.RecordBatch) -> NewSimRequest:
+    """Decode either standalone or stream-schema ``new_sim`` record batches."""
     metadata = _metadata_payload(batch, context="new_sim metadata")
     if metadata.get("op") == "client_requests":
         return _client_request_record_batch_to_new_sim(batch, metadata=metadata)
@@ -146,6 +166,7 @@ def record_batch_to_new_sim(batch: pa.RecordBatch) -> NewSimRequest:
 def action_batch_to_record_batch(
     *, sim_id: str, start_step_index: int, actions: np.ndarray
 ) -> pa.RecordBatch:
+    """Build a standalone ``step`` action record batch."""
     _require_non_empty_string(sim_id, name="sim_id")
     start_step_index = _non_negative_int(start_step_index, name="start_step_index")
     action_values = np.asarray(actions)
@@ -189,6 +210,11 @@ def client_request_new_sim_batch_to_record_batch(
     substeps: int,
     action_shape: tuple[int, ...],
 ) -> pa.RecordBatch:
+    """Build the first request batch for a bidirectional Flight exchange.
+
+    The schema includes both ``initial_state`` and ``action`` tensor columns so
+    later action batches can reuse the exact same Arrow schema on the stream.
+    """
     _require_non_empty_string(task_id, name="task_id")
     views = _metadata_views({"views": views}, default_if_missing=False)
     width = _positive_int(width, name="width")
@@ -243,6 +269,7 @@ def client_request_action_batch_to_record_batch(
     actions: np.ndarray,
     schema: pa.Schema,
 ) -> pa.RecordBatch:
+    """Build a stream action batch using the initial request schema."""
     _require_non_empty_string(sim_id, name="sim_id")
     start_step_index = _non_negative_int(start_step_index, name="start_step_index")
     action_values = np.asarray(actions)
@@ -281,6 +308,7 @@ def client_request_action_batch_to_record_batch(
 def record_batch_to_actions(
     batch: pa.RecordBatch, *, expected_sim_id: str | None = None
 ) -> ActionBatchRequest:
+    """Decode either standalone or stream-schema action record batches."""
     metadata = _metadata_payload(batch, context="actions metadata")
     if metadata.get("op") == "client_requests":
         return _client_request_record_batch_to_actions(
@@ -325,6 +353,7 @@ def record_batch_to_actions(
 def _client_request_record_batch_to_new_sim(
     batch: pa.RecordBatch, *, metadata: dict[str, Any]
 ) -> NewSimRequest:
+    """Decode a ``new_sim`` row from the unified client-request stream schema."""
     _require_client_request_schema(batch.schema)
     _require_columns(batch, ("op", "task_id", "initial_state"))
     if batch.num_rows != 1:
@@ -359,6 +388,7 @@ def _client_request_record_batch_to_actions(
     metadata: dict[str, Any],
     expected_sim_id: str | None,
 ) -> ActionBatchRequest:
+    """Decode ``step`` rows from the unified client-request stream schema."""
     _require_client_request_schema(batch.schema)
     _require_columns(batch, ("op", "sim_id", "start_step_index", "action"))
     if batch.num_rows == 0:
@@ -407,6 +437,7 @@ def observation_batch_to_record_batch(
     qvel: np.ndarray,
     ctrl: np.ndarray,
 ) -> pa.RecordBatch:
+    """Build an observation record batch from camera and actuator arrays."""
     _require_non_empty_string(sim_id, name="sim_id")
     view_names = _metadata_views({"views": view_names}, default_if_missing=False)
     steps = _validated_step_indices(step_indices)
@@ -480,6 +511,7 @@ def observation_batch_to_record_batch(
 
 
 def record_batch_to_observations(batch: pa.RecordBatch) -> ObservationBatch:
+    """Decode an observation record batch returned by the simulation server."""
     _require_columns(batch, ("sim_id", "step_index", "camera", "qpos", "qvel", "ctrl"))
     if batch.num_rows == 0:
         raise ValueError("observation batch must not be empty")
@@ -517,10 +549,12 @@ def record_batch_to_observations(batch: pa.RecordBatch) -> ObservationBatch:
 
 
 def _metadata(**payload: Any) -> dict[bytes, bytes]:
+    """Encode C5R protocol metadata for an Arrow schema."""
     return {METADATA_KEY: json.dumps(payload, sort_keys=True).encode("utf-8")}
 
 
 def _metadata_payload(batch: pa.RecordBatch, *, context: str) -> dict[str, Any]:
+    """Decode C5R protocol metadata from an Arrow record batch schema."""
     metadata = batch.schema.metadata or {}
     raw = metadata.get(METADATA_KEY)
     if raw is None:
@@ -545,6 +579,7 @@ def _client_request_schema(
     action_type: pa.DataType,
     metadata: dict[bytes, bytes],
 ) -> pa.Schema:
+    """Create the shared request schema used by one Flight exchange stream."""
     return pa.schema(
         [
             pa.field("op", pa.string(), nullable=False),
@@ -583,6 +618,7 @@ def _require_op_column(batch: pa.RecordBatch, *, expected: str) -> None:
 def _fixed_shape_tensor_type(
     dtype: np.dtype[Any], value_shape: tuple[int, ...]
 ) -> pa.DataType:
+    """Create an Arrow fixed-shape tensor type for nullable placeholder rows."""
     values = np.zeros((1, *value_shape), dtype=dtype)
     return fixed_shape_tensor_array(
         values,
@@ -594,6 +630,7 @@ def _fixed_shape_tensor_type(
 def _null_fixed_shape_tensor_array(
     tensor_type: pa.DataType, *, row_count: int
 ) -> pa.ExtensionArray:
+    """Create null rows for a fixed-shape tensor column in the stream schema."""
     storage_type = getattr(tensor_type, "storage_type", None)
     if storage_type is None:
         raise ValueError("tensor_type must be a fixed-shape tensor type")
@@ -610,6 +647,7 @@ def _validated_value_shape(values: tuple[int, ...], *, name: str) -> tuple[int, 
 
 
 def _tensor_metadata(values: np.ndarray) -> dict[str, Any]:
+    """Return JSON-serializable tensor dtype and shape metadata."""
     return {"dtype": values.dtype.name, "shape": list(values.shape)}
 
 

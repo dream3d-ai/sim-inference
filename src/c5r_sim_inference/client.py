@@ -12,16 +12,25 @@ from .protocol import (
     client_request_new_sim_batch_to_record_batch,
     record_batch_to_observations,
 )
-from .types import TorchObservation, actions_to_numpy, initial_state_to_numpy
+from .types import Observation
 
 
 class C5RSimClient:
+    """Apache Flight client for creating and stepping C5R simulation streams."""
+
     def __init__(
         self,
         location: str | flight.Location,
         *,
         flight_client: flight.FlightClient | None = None,
     ) -> None:
+        """Create a client for a Flight server location.
+
+        Args:
+            location: Flight URI or prebuilt ``flight.Location``.
+            flight_client: Optional injected client, mainly for tests. When omitted,
+                this instance owns and closes the created Flight client.
+        """
         self._owns_client = flight_client is None
         self._client = flight_client or flight.FlightClient(location)
 
@@ -36,10 +45,29 @@ class C5RSimClient:
         substeps: int,
         action_dim: int | None = None,
     ) -> SimulationStream:
+        """Start one interactive simulation stream.
+
+        The initial request sends the task id, explicit robot state, desired camera
+        views, render size, and simulation substep count. The server responds with
+        the first observation at step index ``0``.
+
+        Args:
+            task_id: Server-configured task id used to resolve the scene.
+            initial_state: Rank-1 CPU/GPU PyTorch tensor containing the robot state.
+            views: Camera view names to render for every observation.
+            width: Render width in pixels.
+            height: Render height in pixels.
+            substeps: Physics substeps to run for each action.
+            action_dim: Optional action width. Defaults to ``len(initial_state)``.
+
+        Returns:
+            A live ``SimulationStream``. Close it when finished, or use it as a
+            context manager.
+        """
         writer, reader = self._client.do_exchange(
             flight.FlightDescriptor.for_command(b"c5r_sim")
         )
-        initial_state_values = initial_state_to_numpy(initial_state)
+        initial_state_values = initial_state.detach().contiguous().cpu().numpy()
         if action_dim is None:
             action_dim = int(initial_state_values.shape[0])
         if action_dim <= 0:
@@ -66,6 +94,7 @@ class C5RSimClient:
         )
 
     def close(self) -> None:
+        """Close the underlying Flight client when this instance owns it."""
         close = getattr(self._client, "close", None)
         if close is not None:
             close()
@@ -73,8 +102,10 @@ class C5RSimClient:
 
 @dataclass
 class SimulationStream:
+    """Live bidirectional Flight stream for a single server-side simulation."""
+
     sim_id: str
-    initial_observation: TorchObservation
+    initial_observation: Observation
     writer: Any
     reader: Any
     request_schema: pa.Schema
@@ -82,8 +113,17 @@ class SimulationStream:
     next_step_index: int = 1
     _closed: bool = False
 
-    def step(self, actions: torch.Tensor) -> TorchObservation:
-        action_values = actions_to_numpy(actions)
+    def step(self, actions: torch.Tensor) -> Observation:
+        """Send a variable-size action batch and read the matching observations.
+
+        Args:
+            actions: Rank-2 PyTorch tensor with shape ``(batch, action_dim)``.
+
+        Returns:
+            A ``TorchObservation`` whose leading dimension matches the number of
+            action rows sent.
+        """
+        action_values = actions.detach().contiguous().cpu().numpy()
         action_batch = client_request_action_batch_to_record_batch(
             sim_id=self.sim_id,
             start_step_index=self.next_step_index,
@@ -106,6 +146,7 @@ class SimulationStream:
         return observation
 
     def close(self) -> None:
+        """Finish the Flight exchange and close stream resources."""
         if self._closed:
             return
         self._closed = True
@@ -129,9 +170,11 @@ class SimulationStream:
             raise errors[0]
 
     def __enter__(self) -> SimulationStream:
+        """Return this stream for ``with`` statement usage."""
         return self
 
     def __exit__(self, exc_type, exc, traceback) -> bool:
+        """Close stream resources when leaving a ``with`` block."""
         try:
             self.close()
         except BaseException as close_error:
@@ -142,15 +185,17 @@ class SimulationStream:
         return False
 
 
-def _read_observation(reader: Any) -> TorchObservation:
+def _read_observation(reader: Any) -> Observation:
+    """Read one observation record batch from a Flight exchange reader."""
     chunk = reader.read_chunk()
     batch = getattr(chunk, "data", chunk)
     if not isinstance(batch, pa.RecordBatch):
         raise TypeError(f"Flight reader returned {type(batch).__name__}")
-    return TorchObservation.from_batch(record_batch_to_observations(batch))
+    return Observation.from_batch(record_batch_to_observations(batch))
 
 
 def _begin_if_available(writer: Any, schema: pa.Schema) -> None:
+    """Begin a writer with ``schema`` when the writer exposes ``begin``."""
     begin = getattr(writer, "begin", None)
     if begin is not None:
         begin(schema)
