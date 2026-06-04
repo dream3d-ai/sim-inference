@@ -232,7 +232,6 @@ def main(
     output.parent.mkdir(parents=True, exist_ok=True)
 
     client = C5RSimClient(server)
-    stream = None
     frames_written = 0
     try:
         # Setup Sim
@@ -242,7 +241,7 @@ def main(
             fill_value=float(initial_state_value),
             dtype=torch.float32,
         )
-        stream = client.start_sim(
+        with client.start_sim(
             task_id=task_id,
             initial_state=initial_state,
             views=parsed_views,
@@ -250,45 +249,42 @@ def main(
             height=height,
             substeps=substeps,
             action_dim=action_dim,
-        )
-        typer.echo(f"started sim {stream.sim_id} from task {task_id!r}")
+        ) as stream:
+            typer.echo(f"started sim {stream.sim_id} from task {task_id!r}")
 
-        with imageio.get_writer(output, fps=fps, macro_block_size=1) as writer:
-            # Write initial observation to video
-            writer.append_data(
-                observation_grid_frame(
-                    stream.initial_observation,
-                    row=0,
-                    title_prefix=title_prefix,
-                )
-            )
-            frames_written += 1
-
-            # Generate action batches and write to video
-            for actions in iter_action_batches(
-                frame_count=frames,
-                batch_size=batch_size,
-                action_dim=action_dim,
-                action_mode=action_mode,
-                action_scale=action_scale,
-                seed=seed,
-            ):
-                observation = stream.step(actions)
-                for row in range(observation.camera.shape[0]):
-                    writer.append_data(
-                        observation_grid_frame(
-                            observation,
-                            row=row,
-                            title_prefix=title_prefix,
-                        )
+            with imageio.get_writer(output, fps=fps, macro_block_size=1) as writer:
+                # Write initial observation to video
+                writer.append_data(
+                    observation_grid_frame(
+                        stream.initial_observation,
+                        row=0,
+                        title_prefix=title_prefix,
                     )
-                    frames_written += 1
-        typer.echo(f"wrote {frames_written} grid frames to {output}")
+                )
+                frames_written += 1
+
+                # Generate action batches and write to video
+                for actions in iter_action_batches(
+                    frame_count=frames,
+                    batch_size=batch_size,
+                    action_dim=action_dim,
+                    action_mode=action_mode,
+                    action_scale=action_scale,
+                    seed=seed,
+                ):
+                    observation = stream.step(actions)
+                    for row in range(observation.camera.shape[0]):
+                        writer.append_data(
+                            observation_grid_frame(
+                                observation,
+                                row=row,
+                                title_prefix=title_prefix,
+                            )
+                        )
+                        frames_written += 1
+            typer.echo(f"wrote {frames_written} grid frames to {output}")
     finally:
-        if stream is not None:
-            stream.close()
-        else:
-            client.close()
+        client.close()
 
 
 if __name__ == "__main__":

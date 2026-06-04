@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import importlib.util
 from pathlib import Path
 
@@ -14,6 +15,11 @@ def _load_demo_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _demo_source_tree() -> ast.AST:
+    path = Path(__file__).parents[1] / "examples" / "demo.py"
+    return ast.parse(path.read_text())
 
 
 def test_demo_cli_uses_typer_and_exposes_existing_options() -> None:
@@ -38,3 +44,20 @@ def test_demo_cli_uses_typer_and_exposes_existing_options() -> None:
     assert "views to render." in result.output
     assert "Action generation mode" in result.output
     assert "for simulated steps." in result.output
+
+
+def test_demo_uses_start_sim_context_manager() -> None:
+    tree = _demo_source_tree()
+
+    uses_start_sim_context_manager = any(
+        isinstance(node, ast.With)
+        and any(
+            isinstance(item.context_expr, ast.Call)
+            and isinstance(item.context_expr.func, ast.Attribute)
+            and item.context_expr.func.attr == "start_sim"
+            for item in node.items
+        )
+        for node in ast.walk(tree)
+    )
+
+    assert uses_start_sim_context_manager
