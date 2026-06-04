@@ -53,17 +53,20 @@ def iter_action_batches(
     *,
     frame_count: int,
     batch_size: int,
+    env_count: int,
     action_dim: int,
     action_mode: ActionMode,
     action_scale: float,
     seed: int,
 ) -> Iterator[np.ndarray]:
-    """Yield batched action arrays for each simulated frame after the initial state."""
+    """Yield env-major action arrays for each simulated frame after the initial state."""
 
     if frame_count < 1:
         raise ValueError("frame_count must be >= 1")
     if batch_size < 1:
         raise ValueError("batch_size must be >= 1")
+    if env_count < 1:
+        raise ValueError("env_count must be >= 1")
     if action_dim < 1:
         raise ValueError("action_dim must be >= 1")
     if action_scale < 0:
@@ -74,12 +77,12 @@ def iter_action_batches(
     while remaining > 0:
         rows = min(batch_size, remaining)
         if action_mode == "zeros":
-            actions = np.zeros((rows, action_dim), dtype=np.float32)
+            actions = np.zeros((env_count, rows, action_dim), dtype=np.float32)
         elif action_mode == "random":
             actions = rng.uniform(
                 low=-action_scale,
                 high=action_scale,
-                size=(rows, action_dim),
+                size=(env_count, rows, action_dim),
             ).astype(np.float32)
         else:
             raise ValueError(f"unsupported action_mode: {action_mode!r}")
@@ -95,16 +98,16 @@ def observation_grid_frame(
 ) -> np.ndarray:
     """Render one row of a streamed observation as a titled view grid frame."""
 
-    if observation.camera.ndim != 5:
+    if observation.camera.ndim != 6:
         raise ValueError(
-            "observation camera must have shape (batch, views, height, width, channels)"
+            "observation camera must have shape (step, env, views, height, width, channels)"
         )
     if not 0 <= row < observation.camera.shape[0]:
         raise IndexError(f"observation row {row} is out of bounds")
-    if len(observation.view_names) != observation.camera.shape[1]:
+    if len(observation.view_names) != observation.camera.shape[2]:
         raise ValueError("observation view_names do not match camera view dimension")
 
-    camera = observation.camera[row]
+    camera = observation.camera[row, 0]
     images = {
         view: np.ascontiguousarray(camera[view_index])
         for view_index, view in enumerate(observation.view_names)
@@ -202,6 +205,14 @@ def main(
         min=1,
         help="Simulation substeps to advance for each action.",
     ),
+    scene_seed: int = typer.Option(
+        0,
+        help="Scene seed used for server-side scene and physics randomization.",
+    ),
+    physics_randomization: str = typer.Option(
+        "none",
+        help="Physics randomization profile: low, default, high, or none.",
+    ),
     fps: float = typer.Option(
         10.0,
         min=0.0,
@@ -236,9 +247,14 @@ def main(
         # Setup Sim
         parsed_views = tuple(view.strip() for view in views.split(",") if view.strip())
         initial_state = np.full(
-            (state_dim,),
+            (1, state_dim),
             fill_value=float(initial_state_value),
             dtype=np.float32,
+        )
+        physics_profile = (
+            None
+            if physics_randomization.lower() in {"", "none", "false", "off"}
+            else physics_randomization
         )
         with client.start_sim(
             task_id=task_id,
@@ -247,6 +263,8 @@ def main(
             width=width,
             height=height,
             substeps=substeps,
+            scene_seed=scene_seed if physics_profile is not None else None,
+            physics_randomization=physics_profile,
             action_dim=action_dim,
         ) as stream:
             typer.echo(f"started sim {stream.sim_id} from task {task_id!r}")
@@ -270,6 +288,7 @@ def main(
                 for actions in iter_action_batches(
                     frame_count=frames,
                     batch_size=batch_size,
+                    env_count=1,
                     action_dim=action_dim,
                     action_mode=action_mode,
                     action_scale=action_scale,

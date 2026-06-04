@@ -8,6 +8,7 @@ import pyarrow as pa
 import pyarrow.flight as flight
 
 from .protocol import (
+    DEFAULT_VIEW_NAMES,
     client_request_action_batch_to_record_batch,
     client_request_new_sim_batch_to_record_batch,
     record_batch_to_observations,
@@ -39,11 +40,13 @@ class C5RSimClient:
         *,
         task_id: str,
         initial_state: np.ndarray,
-        views: tuple[str, ...],
+        views: tuple[str, ...] = DEFAULT_VIEW_NAMES,
         width: int,
         height: int,
         substeps: int,
         action_dim: int | None = None,
+        scene_seed: int | None = None,
+        physics_randomization: bool | str | None = None,
     ) -> SimulationStream:
         """Start one interactive simulation stream.
 
@@ -53,12 +56,16 @@ class C5RSimClient:
 
         Args:
             task_id: Server-configured task id used to resolve the scene.
-            initial_state: Rank-1 NumPy array containing the robot state.
-            views: Camera view names to render for every observation.
+            initial_state: Rank-2 NumPy array with shape ``(env, state_dim)``.
+            views: Camera view names to render for every observation. Defaults to all views.
             width: Render width in pixels.
             height: Render height in pixels.
             substeps: Physics substeps to run for each action.
-            action_dim: Optional action width. Defaults to ``len(initial_state)``.
+            action_dim: Optional action width. Defaults to ``initial_state.shape[1]``.
+            scene_seed: Optional reproducibility seed for physics randomization.
+            physics_randomization: Server-owned physics profile. ``True`` uses
+                the default profile; strings select named profiles such as
+                ``"low"``, ``"default"``, or ``"high"``.
 
         Returns:
             A live ``SimulationStream``. Close it when finished, or use it as a
@@ -69,9 +76,13 @@ class C5RSimClient:
             flight.FlightDescriptor.for_command(b"c5r_sim")
         )
         if action_dim is None:
-            action_dim = int(initial_state.shape[0])
+            if initial_state.ndim != 2:
+                raise ValueError("initial_state must have shape (env, state_dim)")
+            action_dim = int(initial_state.shape[1])
         if action_dim <= 0:
             raise ValueError("action_dim must be positive")
+        if initial_state.ndim != 2:
+            raise ValueError("initial_state must have shape (env, state_dim)")
         initial_batch = client_request_new_sim_batch_to_record_batch(
             task_id=task_id,
             initial_state=initial_state,
@@ -79,7 +90,9 @@ class C5RSimClient:
             width=width,
             height=height,
             substeps=substeps,
-            action_shape=(action_dim,),
+            action_shape=(int(initial_state.shape[0]), action_dim),
+            scene_seed=scene_seed,
+            physics_randomization=physics_randomization,
         )
         _begin_if_available(writer, initial_batch.schema)
         writer.write_batch(initial_batch)
@@ -117,21 +130,22 @@ class SimulationStream:
         """Send a variable-size action batch and read the matching observations.
 
         Args:
-            actions: Rank-2 NumPy array with shape ``(batch, action_dim)``.
+            actions: Rank-3 NumPy array with shape ``(env, step, action_dim)``.
 
         Returns:
-            An ``Observation`` whose leading dimension matches the action rows sent.
+            An ``Observation`` whose leading dimension matches the requested steps.
         """
         _require_numpy_array(actions, name="actions")
+        action_values = _env_major_actions_to_step_major(actions)
         action_batch = client_request_action_batch_to_record_batch(
             sim_id=self.sim_id,
             start_step_index=self.next_step_index,
-            actions=actions,
+            actions=action_values,
             schema=self.request_schema,
         )
         self.writer.write_batch(action_batch)
         observation = _read_observation(self.reader)
-        row_count = int(actions.shape[0])
+        row_count = int(action_values.shape[0])
         if observation.sim_id != self.sim_id:
             raise ValueError(
                 f"observation sim_id {observation.sim_id!r} does not match {self.sim_id!r}"
@@ -154,7 +168,6 @@ class SimulationStream:
             (self.writer, "done_writing"),
             (self.writer, "close"),
             (self.reader, "close"),
-            (self.owner, "close"),
         ):
             if target is None:
                 continue
@@ -204,3 +217,11 @@ def _require_numpy_array(values: Any, *, name: str) -> None:
     """Require SDK callers to pass NumPy arrays without framework conversion."""
     if not isinstance(values, np.ndarray):
         raise TypeError(f"{name} must be a numpy.ndarray")
+
+
+def _env_major_actions_to_step_major(actions: np.ndarray) -> np.ndarray:
+    """Convert SDK action batches from (env, step, action_dim) to protocol shape."""
+
+    if actions.ndim != 3:
+        raise ValueError("actions must have shape (env, step, action_dim)")
+    return np.array(np.swapaxes(actions, 0, 1), dtype=actions.dtype, order="C", copy=True)

@@ -44,6 +44,8 @@ def test_demo_cli_uses_typer_and_exposes_existing_options() -> None:
     assert "--task-id" in result.output
     assert "--batch-size" in result.output
     assert "--action-mode" in result.output
+    assert "--scene-seed" in result.output
+    assert "--physics-randomization" in result.output
     assert "Flight server URI." in result.output
     assert "Comma-separated camera" in result.output
     assert "views to render." in result.output
@@ -83,3 +85,10 @@ def test_demo_uses_start_sim_context_manager() -> None:
     )
 
     assert uses_start_sim_context_manager
+
+
+def test_demo_passes_physics_randomization_to_start_sim() -> None:
+    source = _demo_source()
+
+    assert "scene_seed=scene_seed if physics_profile is not None else None" in source
+    assert "physics_randomization=physics_profile" in source
