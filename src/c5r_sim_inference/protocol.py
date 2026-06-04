@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 import pyarrow as pa
 
 METADATA_KEY = b"c5r_sim"
+DEFAULT_VIEW_NAMES = ("overhead", "side", "wrist_left", "wrist_right")
+DEFAULT_PHYSICS_RANDOMIZATION_PROFILE = "default"
 
 
 @dataclass(frozen=True)
@@ -20,6 +22,7 @@ class NewSimRequest:
     width: int
     height: int
     substeps: int
+    scene_options: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -85,10 +88,34 @@ def new_sim_batch_to_record_batch(
     *,
     task_id: str,
     initial_state: np.ndarray,
-    views: tuple[str, ...],
+    views: tuple[str, ...] = DEFAULT_VIEW_NAMES,
     width: int,
     height: int,
     substeps: int,
+    scene_seed: int | None = None,
+    physics_randomization: bool | str | None = None,
+    rack_dynamic: bool = True,
+    tube_radius: float | None = None,
+    tube_half_length: float | None = None,
+    tube_mass_kg: float | None = None,
+    rack_contact_friction: tuple[float, float, float] = (0.65, 0.006, 0.0001),
+    rack_contact_solref: tuple[float, float] = (0.006, 1.0),
+    rack_contact_solimp: tuple[float, float, float] = (0.9, 0.95, 0.001),
+    tube_contact_friction: tuple[float, float, float] = (0.8, 0.006, 0.0001),
+    tube_contact_solref: tuple[float, float] = (0.006, 1.0),
+    tube_contact_solimp: tuple[float, float, float] = (0.9, 0.95, 0.001),
+    table_x_min: float = -0.08,
+    table_x_max: float = 0.26,
+    table_y_min: float = -0.20,
+    table_y_max: float = 0.24,
+    table_top_z: float = 0.760,
+    rack_yaw_range: tuple[float, float] = (-3.141592653589793, 3.141592653589793),
+    tube_starts_in_rack_hole: bool | None = None,
+    tube_mode: str | None = None,
+    tube_hole_index: int | str | None = "random",
+    tube_table_spawn_height_m: float = 0.005,
+    tube_table_roll_range: tuple[float, float] = (1.25, 1.9),
+    tube_table_pitch_range: tuple[float, float] = (-0.35, 0.35),
 ) -> pa.RecordBatch:
     """Build a standalone ``new_sim`` record batch.
 
@@ -101,9 +128,36 @@ def new_sim_batch_to_record_batch(
     width = _positive_int(width, name="width")
     height = _positive_int(height, name="height")
     substeps = _positive_int(substeps, name="substeps")
+    scene_options = _scene_options_from_kwargs(
+        task_id=task_id,
+        scene_seed=scene_seed,
+        physics_randomization=physics_randomization,
+        rack_dynamic=rack_dynamic,
+        tube_radius=tube_radius,
+        tube_half_length=tube_half_length,
+        tube_mass_kg=tube_mass_kg,
+        rack_contact_friction=rack_contact_friction,
+        rack_contact_solref=rack_contact_solref,
+        rack_contact_solimp=rack_contact_solimp,
+        tube_contact_friction=tube_contact_friction,
+        tube_contact_solref=tube_contact_solref,
+        tube_contact_solimp=tube_contact_solimp,
+        table_x_min=table_x_min,
+        table_x_max=table_x_max,
+        table_y_min=table_y_min,
+        table_y_max=table_y_max,
+        table_top_z=table_top_z,
+        rack_yaw_range=rack_yaw_range,
+        tube_starts_in_rack_hole=tube_starts_in_rack_hole,
+        tube_mode=tube_mode,
+        tube_hole_index=tube_hole_index,
+        tube_table_spawn_height_m=tube_table_spawn_height_m,
+        tube_table_roll_range=tube_table_roll_range,
+        tube_table_pitch_range=tube_table_pitch_range,
+    )
     state = np.asarray(initial_state)
-    if state.ndim != 1:
-        raise ValueError("initial_state must be a 1D array")
+    if state.ndim != 2:
+        raise ValueError("initial_state must have shape (env, state_dim)")
     if state.dtype != np.float32:
         state = state.astype(np.float32)
     if not np.all(np.isfinite(state)):
@@ -123,6 +177,7 @@ def new_sim_batch_to_record_batch(
             width=width,
             height=height,
             substeps=substeps,
+            scene_options=scene_options,
             tensors={"initial_state": _tensor_metadata(row_state)},
         ),
     )
@@ -146,11 +201,9 @@ def record_batch_to_new_sim(batch: pa.RecordBatch) -> NewSimRequest:
     _require_fixed_shape_tensor_value_type(
         initial_state_column, dtype=pa.float32(), name="initial_state"
     )
-    initial_state = fixed_shape_tensor_to_numpy(
-        initial_state_column, name="initial_state"
-    )[0]
-    if initial_state.ndim != 1:
-        raise ValueError("initial_state must be a 1D array")
+    initial_state = fixed_shape_tensor_to_numpy(initial_state_column, name="initial_state")[0]
+    if initial_state.ndim != 2:
+        raise ValueError("initial_state must have shape (env, state_dim)")
     if not np.all(np.isfinite(initial_state)):
         raise ValueError("initial_state must contain only finite values")
     return NewSimRequest(
@@ -160,6 +213,7 @@ def record_batch_to_new_sim(batch: pa.RecordBatch) -> NewSimRequest:
         width=_positive_int(metadata.get("width"), name="width"),
         height=_positive_int(metadata.get("height"), name="height"),
         substeps=_positive_int(metadata.get("substeps"), name="substeps"),
+        scene_options=_metadata_scene_options(metadata),
     )
 
 
@@ -170,8 +224,8 @@ def action_batch_to_record_batch(
     _require_non_empty_string(sim_id, name="sim_id")
     start_step_index = _non_negative_int(start_step_index, name="start_step_index")
     action_values = np.asarray(actions)
-    if action_values.ndim != 2:
-        raise ValueError("actions must have shape (batch, action_dim)")
+    if action_values.ndim != 3:
+        raise ValueError("actions must have shape (batch, env, action_dim)")
     if action_values.shape[0] == 0:
         raise ValueError("actions batch must not be empty")
     if action_values.dtype != np.float32:
@@ -204,11 +258,35 @@ def client_request_new_sim_batch_to_record_batch(
     *,
     task_id: str,
     initial_state: np.ndarray,
-    views: tuple[str, ...],
+    views: tuple[str, ...] = DEFAULT_VIEW_NAMES,
     width: int,
     height: int,
     substeps: int,
     action_shape: tuple[int, ...],
+    scene_seed: int | None = None,
+    physics_randomization: bool | str | None = None,
+    rack_dynamic: bool = True,
+    tube_radius: float | None = None,
+    tube_half_length: float | None = None,
+    tube_mass_kg: float | None = None,
+    rack_contact_friction: tuple[float, float, float] = (0.65, 0.006, 0.0001),
+    rack_contact_solref: tuple[float, float] = (0.006, 1.0),
+    rack_contact_solimp: tuple[float, float, float] = (0.9, 0.95, 0.001),
+    tube_contact_friction: tuple[float, float, float] = (0.8, 0.006, 0.0001),
+    tube_contact_solref: tuple[float, float] = (0.006, 1.0),
+    tube_contact_solimp: tuple[float, float, float] = (0.9, 0.95, 0.001),
+    table_x_min: float = -0.08,
+    table_x_max: float = 0.26,
+    table_y_min: float = -0.20,
+    table_y_max: float = 0.24,
+    table_top_z: float = 0.760,
+    rack_yaw_range: tuple[float, float] = (-3.141592653589793, 3.141592653589793),
+    tube_starts_in_rack_hole: bool | None = None,
+    tube_mode: str | None = None,
+    tube_hole_index: int | str | None = "random",
+    tube_table_spawn_height_m: float = 0.005,
+    tube_table_roll_range: tuple[float, float] = (1.25, 1.9),
+    tube_table_pitch_range: tuple[float, float] = (-0.35, 0.35),
 ) -> pa.RecordBatch:
     """Build the first request batch for a bidirectional Flight exchange.
 
@@ -221,9 +299,36 @@ def client_request_new_sim_batch_to_record_batch(
     height = _positive_int(height, name="height")
     substeps = _positive_int(substeps, name="substeps")
     action_shape = _validated_value_shape(action_shape, name="action_shape")
+    scene_options = _scene_options_from_kwargs(
+        task_id=task_id,
+        scene_seed=scene_seed,
+        physics_randomization=physics_randomization,
+        rack_dynamic=rack_dynamic,
+        tube_radius=tube_radius,
+        tube_half_length=tube_half_length,
+        tube_mass_kg=tube_mass_kg,
+        rack_contact_friction=rack_contact_friction,
+        rack_contact_solref=rack_contact_solref,
+        rack_contact_solimp=rack_contact_solimp,
+        tube_contact_friction=tube_contact_friction,
+        tube_contact_solref=tube_contact_solref,
+        tube_contact_solimp=tube_contact_solimp,
+        table_x_min=table_x_min,
+        table_x_max=table_x_max,
+        table_y_min=table_y_min,
+        table_y_max=table_y_max,
+        table_top_z=table_top_z,
+        rack_yaw_range=rack_yaw_range,
+        tube_starts_in_rack_hole=tube_starts_in_rack_hole,
+        tube_mode=tube_mode,
+        tube_hole_index=tube_hole_index,
+        tube_table_spawn_height_m=tube_table_spawn_height_m,
+        tube_table_roll_range=tube_table_roll_range,
+        tube_table_pitch_range=tube_table_pitch_range,
+    )
     state = np.asarray(initial_state)
-    if state.ndim != 1:
-        raise ValueError("initial_state must be a 1D array")
+    if state.ndim != 2:
+        raise ValueError("initial_state must have shape (env, state_dim)")
     if state.dtype != np.float32:
         state = state.astype(np.float32)
     if not np.all(np.isfinite(state)):
@@ -239,6 +344,7 @@ def client_request_new_sim_batch_to_record_batch(
         width=width,
         height=height,
         substeps=substeps,
+        scene_options=scene_options,
         tensors={
             "initial_state": _tensor_metadata(row_state),
             "action": {"dtype": "float32", "shape": [1, *action_shape]},
@@ -273,8 +379,8 @@ def client_request_action_batch_to_record_batch(
     _require_non_empty_string(sim_id, name="sim_id")
     start_step_index = _non_negative_int(start_step_index, name="start_step_index")
     action_values = np.asarray(actions)
-    if action_values.ndim != 2:
-        raise ValueError("actions must have shape (batch, action_dim)")
+    if action_values.ndim != 3:
+        raise ValueError("actions must have shape (batch, env, action_dim)")
     if action_values.shape[0] == 0:
         raise ValueError("actions batch must not be empty")
     if action_values.dtype != np.float32:
@@ -335,12 +441,10 @@ def record_batch_to_actions(
     if any(int(value) != start_step_index for value in start_indices):
         raise ValueError("actions batch must contain one start_step_index")
     action_column = batch.column("action")
-    _require_fixed_shape_tensor_value_type(
-        action_column, dtype=pa.float32(), name="actions"
-    )
+    _require_fixed_shape_tensor_value_type(action_column, dtype=pa.float32(), name="actions")
     actions = fixed_shape_tensor_to_numpy(action_column, name="actions")
-    if actions.ndim != 2:
-        raise ValueError("actions must have shape (batch, action_dim)")
+    if actions.ndim != 3:
+        raise ValueError("actions must have shape (batch, env, action_dim)")
     if not np.all(np.isfinite(actions)):
         raise ValueError("actions must contain only finite values")
     return ActionBatchRequest(
@@ -365,11 +469,9 @@ def _client_request_record_batch_to_new_sim(
     _require_fixed_shape_tensor_value_type(
         initial_state_column, dtype=pa.float32(), name="initial_state"
     )
-    initial_state = fixed_shape_tensor_to_numpy(
-        initial_state_column, name="initial_state"
-    )[0]
-    if initial_state.ndim != 1:
-        raise ValueError("initial_state must be a 1D array")
+    initial_state = fixed_shape_tensor_to_numpy(initial_state_column, name="initial_state")[0]
+    if initial_state.ndim != 2:
+        raise ValueError("initial_state must have shape (env, state_dim)")
     if not np.all(np.isfinite(initial_state)):
         raise ValueError("initial_state must contain only finite values")
     return NewSimRequest(
@@ -379,6 +481,7 @@ def _client_request_record_batch_to_new_sim(
         width=_positive_int(metadata.get("width"), name="width"),
         height=_positive_int(metadata.get("height"), name="height"),
         substeps=_positive_int(metadata.get("substeps"), name="substeps"),
+        scene_options=_metadata_scene_options(metadata),
     )
 
 
@@ -411,12 +514,10 @@ def _client_request_record_batch_to_actions(
     if any(int(value) != start_step_index for value in start_indices):
         raise ValueError("actions batch must contain one start_step_index")
     action_column = batch.column("action")
-    _require_fixed_shape_tensor_value_type(
-        action_column, dtype=pa.float32(), name="actions"
-    )
+    _require_fixed_shape_tensor_value_type(action_column, dtype=pa.float32(), name="actions")
     actions = fixed_shape_tensor_to_numpy(action_column, name="actions")
-    if actions.ndim != 2:
-        raise ValueError("actions must have shape (batch, action_dim)")
+    if actions.ndim != 3:
+        raise ValueError("actions must have shape (batch, env, action_dim)")
     if not np.all(np.isfinite(actions)):
         raise ValueError("actions must contain only finite values")
     _require_metadata_op(metadata, expected="client_requests", label="client request")
@@ -449,9 +550,7 @@ def observation_batch_to_record_batch(
     _require_array_dtype(qpos_values, dtype=np.float32, name="qpos")
     _require_array_dtype(qvel_values, dtype=np.float32, name="qvel")
     _require_array_dtype(ctrl_values, dtype=np.float32, name="ctrl")
-    _validate_observation_tensor_shapes(
-        camera_values, qpos_values, qvel_values, ctrl_values
-    )
+    _validate_observation_tensor_shapes(camera_values, qpos_values, qvel_values, ctrl_values)
     row_count = steps.shape[0]
     if row_count == 0:
         raise ValueError("observation batch must not be empty")
@@ -527,7 +626,7 @@ def record_batch_to_observations(batch: pa.RecordBatch) -> ObservationBatch:
     _require_arrow_int64_column(step_index_column, name="step_index")
     step_indices = _validated_step_indices(step_index_column.to_pylist())
     view_names = _metadata_views(metadata, default_if_missing=False)
-    camera = fixed_shape_tensor_to_numpy(batch.column("camera"), name="camera")
+    camera = _camera_values_from_record_batch(batch, metadata=metadata)
     qpos = fixed_shape_tensor_to_numpy(batch.column("qpos"), name="qpos")
     qvel = fixed_shape_tensor_to_numpy(batch.column("qvel"), name="qvel")
     ctrl = fixed_shape_tensor_to_numpy(batch.column("ctrl"), name="ctrl")
@@ -615,9 +714,7 @@ def _require_op_column(batch: pa.RecordBatch, *, expected: str) -> None:
         raise ValueError(f"client request op must be {expected!r}")
 
 
-def _fixed_shape_tensor_type(
-    dtype: np.dtype[Any], value_shape: tuple[int, ...]
-) -> pa.DataType:
+def _fixed_shape_tensor_type(dtype: np.dtype[Any], value_shape: tuple[int, ...]) -> pa.DataType:
     """Create an Arrow fixed-shape tensor type for nullable placeholder rows."""
     values = np.zeros((1, *value_shape), dtype=dtype)
     return fixed_shape_tensor_array(
@@ -651,9 +748,7 @@ def _tensor_metadata(values: np.ndarray) -> dict[str, Any]:
     return {"dtype": values.dtype.name, "shape": list(values.shape)}
 
 
-def _metadata_views(
-    metadata: dict[str, Any], *, default_if_missing: bool
-) -> tuple[str, ...]:
+def _metadata_views(metadata: dict[str, Any], *, default_if_missing: bool) -> tuple[str, ...]:
     if "views" not in metadata:
         if default_if_missing:
             return ()
@@ -665,9 +760,155 @@ def _metadata_views(
     for view in views:
         _require_non_empty_string(view, name="view")
         parsed.append(view)
-    if not parsed:
-        raise ValueError("views must not be empty")
     return tuple(parsed)
+
+
+def _metadata_scene_options(metadata: dict[str, Any]) -> dict[str, Any]:
+    options = metadata.get("scene_options", {})
+    if options is None:
+        return {}
+    if not isinstance(options, dict):
+        raise ValueError("scene_options must be an object")
+    return dict(options)
+
+
+def _scene_options_from_kwargs(
+    *,
+    task_id: str,
+    scene_seed: int | None,
+    physics_randomization: bool | str | None,
+    rack_dynamic: bool,
+    tube_radius: float | None,
+    tube_half_length: float | None,
+    tube_mass_kg: float | None,
+    rack_contact_friction: tuple[float, float, float],
+    rack_contact_solref: tuple[float, float],
+    rack_contact_solimp: tuple[float, float, float],
+    tube_contact_friction: tuple[float, float, float],
+    tube_contact_solref: tuple[float, float],
+    tube_contact_solimp: tuple[float, float, float],
+    table_x_min: float,
+    table_x_max: float,
+    table_y_min: float,
+    table_y_max: float,
+    table_top_z: float,
+    rack_yaw_range: tuple[float, float],
+    tube_starts_in_rack_hole: bool | None,
+    tube_mode: str | None,
+    tube_hole_index: int | str | None,
+    tube_table_spawn_height_m: float,
+    tube_table_roll_range: tuple[float, float],
+    tube_table_pitch_range: tuple[float, float],
+) -> dict[str, Any]:
+    if scene_seed is None:
+        if physics_randomization not in (None, False):
+            raise ValueError("physics_randomization requires scene_seed")
+        return {}
+    if not isinstance(scene_seed, int) or isinstance(scene_seed, bool):
+        raise ValueError("scene_seed must be an int")
+    resolved_tube_mode = tube_mode or _default_tube_mode(task_id)
+    if resolved_tube_mode not in {"rack-hole", "table"}:
+        raise ValueError("tube_mode must be 'rack-hole' or 'table'")
+    if tube_starts_in_rack_hole is None:
+        tube_starts_in_rack_hole = resolved_tube_mode == "rack-hole"
+    elif not isinstance(tube_starts_in_rack_hole, bool):
+        raise ValueError("tube_starts_in_rack_hole must be a bool")
+    if not isinstance(rack_dynamic, bool):
+        raise ValueError("rack_dynamic must be a bool")
+    radius, half_length, mass = _default_tube_spec(task_id)
+    options = {
+        "kind": "rack_tube",
+        "seed": scene_seed,
+        "physics": {
+            "rack_dynamic": rack_dynamic,
+            "rack": {
+                "tube_radius": _float_or_default(tube_radius, radius),
+                "tube_half_length": _float_or_default(tube_half_length, half_length),
+                "tube_mass_kg": _float_or_default(tube_mass_kg, mass),
+            },
+            "material": {
+                "rack_contact": {
+                    "friction": list(
+                        _float_tuple(rack_contact_friction, 3, "rack_contact_friction")
+                    ),
+                    "solref": list(_float_tuple(rack_contact_solref, 2, "rack_contact_solref")),
+                    "solimp": list(_float_tuple(rack_contact_solimp, 3, "rack_contact_solimp")),
+                },
+                "tube_contact": {
+                    "friction": list(
+                        _float_tuple(tube_contact_friction, 3, "tube_contact_friction")
+                    ),
+                    "solref": list(_float_tuple(tube_contact_solref, 2, "tube_contact_solref")),
+                    "solimp": list(_float_tuple(tube_contact_solimp, 3, "tube_contact_solimp")),
+                },
+            },
+            "randomization": {
+                "placement": {
+                    "table_bounds": {
+                        "x_min": float(table_x_min),
+                        "x_max": float(table_x_max),
+                        "y_min": float(table_y_min),
+                        "y_max": float(table_y_max),
+                    },
+                    "table_top_z": float(table_top_z),
+                    "rack_yaw_range": list(_float_tuple(rack_yaw_range, 2, "rack_yaw_range")),
+                    "tube_starts_in_rack_hole": tube_starts_in_rack_hole,
+                    "tube_mode": resolved_tube_mode,
+                    "tube_hole_index": _tube_hole_index(tube_hole_index),
+                    "tube_table_spawn_height_m": float(tube_table_spawn_height_m),
+                    "tube_table_roll_range": list(
+                        _float_tuple(tube_table_roll_range, 2, "tube_table_roll_range")
+                    ),
+                    "tube_table_pitch_range": list(
+                        _float_tuple(tube_table_pitch_range, 2, "tube_table_pitch_range")
+                    ),
+                },
+                "sampled": {},
+            },
+        },
+    }
+    randomization_option = _physics_randomization_option(physics_randomization)
+    if randomization_option is not None:
+        options["physics_randomization"] = randomization_option
+    return options
+
+
+def _default_tube_mode(task_id: str) -> str:
+    return "table" if task_id in {"task_12", "task_14"} else "rack-hole"
+
+
+def _default_tube_spec(task_id: str) -> tuple[float, float, float]:
+    if task_id in {"task_13", "task_14"}:
+        return 0.0085, 0.059, 0.015
+    return 0.0062, 0.0335, 0.011
+
+
+def _physics_randomization_option(value: bool | str | None) -> dict[str, str] | None:
+    if value in (None, False):
+        return None
+    if value is True:
+        return {"profile": DEFAULT_PHYSICS_RANDOMIZATION_PROFILE}
+    if isinstance(value, str) and value:
+        return {"profile": value}
+    raise ValueError("physics_randomization must be a bool or non-empty profile string")
+
+
+def _float_or_default(value: float | None, default: float) -> float:
+    return float(default if value is None else value)
+
+
+def _float_tuple(values: tuple[float, ...], length: int, name: str) -> tuple[float, ...]:
+    if not isinstance(values, (list, tuple)) or len(values) != length:
+        raise ValueError(f"{name} must contain {length} values")
+    return tuple(float(value) for value in values)
+
+
+def _tube_hole_index(value: int | str | None) -> int | str | None:
+    if value is None or value == "random":
+        return value
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    raise ValueError("tube_hole_index must be an int, 'random', or None")
 
 
 def _require_columns(batch: pa.RecordBatch, columns: tuple[str, ...]) -> None:
@@ -719,9 +960,7 @@ def _contiguous_array(values: np.ndarray, name: str) -> np.ndarray:
     return array
 
 
-def _require_array_dtype(
-    array: np.ndarray, *, dtype: np.dtype[Any], name: str
-) -> None:
+def _require_array_dtype(array: np.ndarray, *, dtype: np.dtype[Any], name: str) -> None:
     expected = np.dtype(dtype)
     if array.dtype != expected:
         raise ValueError(f"{name} must have dtype {expected.name}")
@@ -745,15 +984,35 @@ def _require_arrow_int64_column(values: pa.Array, *, name: str) -> None:
 def _validate_observation_tensor_shapes(
     camera: np.ndarray, qpos: np.ndarray, qvel: np.ndarray, ctrl: np.ndarray
 ) -> None:
-    if camera.ndim != 5:
-        raise ValueError("camera must have shape (batch, views, height, width, channels)")
+    if camera.ndim != 6:
+        raise ValueError("camera must have shape (batch, env, views, height, width, channels)")
     if camera.shape[-1] != 3:
         raise ValueError("camera must have 3 channels")
     for name, values in (("qpos", qpos), ("qvel", qvel), ("ctrl", ctrl)):
-        if values.ndim != 2:
-            raise ValueError(f"{name} must have shape (batch, dim)")
+        if values.ndim != 3:
+            raise ValueError(f"{name} must have shape (batch, env, dim)")
 
 
 def _validate_observation_views(view_names: tuple[str, ...], camera: np.ndarray) -> None:
-    if len(view_names) != camera.shape[1]:
+    if len(view_names) != camera.shape[2]:
         raise ValueError("views length must match camera view dimension")
+
+
+def _camera_values_from_record_batch(
+    batch: pa.RecordBatch, *, metadata: dict[str, Any]
+) -> np.ndarray:
+    camera = fixed_shape_tensor_to_numpy(batch.column("camera"), name="camera")
+    tensor_metadata = metadata.get("tensors", {})
+    if not isinstance(tensor_metadata, dict):
+        return camera
+    camera_metadata = tensor_metadata.get("camera", {})
+    if not isinstance(camera_metadata, dict):
+        return camera
+    shape = camera_metadata.get("shape")
+    if not isinstance(shape, list) or not any(value == 0 for value in shape):
+        return camera
+    if any(not isinstance(value, int) or value < 0 for value in shape):
+        raise ValueError("camera tensor shape metadata must contain non-negative ints")
+    if len(shape) == camera.ndim - 1:
+        return np.zeros((batch.num_rows, *shape), dtype=np.uint8)
+    return np.zeros(tuple(shape), dtype=np.uint8)

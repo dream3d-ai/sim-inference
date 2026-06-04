@@ -63,10 +63,10 @@ def _observation_batch(*, sim_id: str, start: int, rows: int):
         sim_id=sim_id,
         step_indices=np.arange(start, start + rows, dtype=np.int64),
         view_names=("overhead",),
-        camera=np.zeros((rows, 1, 2, 3, 3), dtype=np.uint8),
-        qpos=np.ones((rows, 2), dtype=np.float32),
-        qvel=np.ones((rows, 2), dtype=np.float32) * 2,
-        ctrl=np.ones((rows, 2), dtype=np.float32) * 3,
+        camera=np.zeros((rows, 1, 1, 2, 3, 3), dtype=np.uint8),
+        qpos=np.ones((rows, 1, 2), dtype=np.float32),
+        qvel=np.ones((rows, 1, 2), dtype=np.float32) * 2,
+        ctrl=np.ones((rows, 1, 2), dtype=np.float32) * 3,
     )
 
 
@@ -79,7 +79,7 @@ def test_start_sim_writes_new_sim_and_reads_initial_observation() -> None:
 
     stream = client.start_sim(
         task_id="task_11",
-        initial_state=np.zeros(2, dtype=np.float32),
+        initial_state=np.zeros((1, 2), dtype=np.float32),
         views=("overhead",),
         width=3,
         height=2,
@@ -96,6 +96,76 @@ def test_start_sim_writes_new_sim_and_reads_initial_observation() -> None:
     assert request.views == ("overhead",)
 
 
+def test_start_sim_writes_scene_options() -> None:
+    from c5r_sim_inference.client import C5RSimClient
+    from c5r_sim_inference.protocol import record_batch_to_new_sim
+
+    flight_client = FakeFlightClient([_observation_batch(sim_id="sim-1", start=0, rows=1)])
+
+    C5RSimClient("grpc://unused", flight_client=flight_client).start_sim(
+        task_id="task_12",
+        initial_state=np.zeros((1, 2), dtype=np.float32),
+        views=(),
+        width=3,
+        height=2,
+        substeps=1,
+        scene_seed=17,
+        tube_mode="table",
+        tube_mass_kg=0.02,
+    )
+
+    request = record_batch_to_new_sim(flight_client.writer.batches[0])
+
+    assert request.scene_options is not None
+    assert request.scene_options["seed"] == 17
+    assert request.scene_options["physics"]["rack"]["tube_mass_kg"] == 0.02
+    assert (
+        request.scene_options["physics"]["randomization"]["placement"]["tube_mode"] == "table"
+    )
+
+
+def test_start_sim_writes_physics_randomization_profile() -> None:
+    from c5r_sim_inference.client import C5RSimClient
+    from c5r_sim_inference.protocol import record_batch_to_new_sim
+
+    flight_client = FakeFlightClient([_observation_batch(sim_id="sim-1", start=0, rows=1)])
+
+    C5RSimClient("grpc://unused", flight_client=flight_client).start_sim(
+        task_id="task_11",
+        initial_state=np.zeros((1, 2), dtype=np.float32),
+        views=(),
+        width=3,
+        height=2,
+        substeps=1,
+        scene_seed=17,
+        physics_randomization="default",
+    )
+
+    request = record_batch_to_new_sim(flight_client.writer.batches[0])
+
+    assert request.scene_options is not None
+    assert request.scene_options["physics_randomization"] == {"profile": "default"}
+
+
+def test_start_sim_defaults_to_all_views() -> None:
+    from c5r_sim_inference.client import C5RSimClient
+    from c5r_sim_inference.protocol import DEFAULT_VIEW_NAMES, record_batch_to_new_sim
+
+    flight_client = FakeFlightClient([_observation_batch(sim_id="sim-1", start=0, rows=1)])
+
+    C5RSimClient("grpc://unused", flight_client=flight_client).start_sim(
+        task_id="task_11",
+        initial_state=np.zeros((1, 2), dtype=np.float32),
+        width=3,
+        height=2,
+        substeps=1,
+    )
+
+    request = record_batch_to_new_sim(flight_client.writer.batches[0])
+
+    assert request.views == DEFAULT_VIEW_NAMES
+
+
 def test_step_writes_action_batch_and_returns_matching_observations() -> None:
     from c5r_sim_inference.client import C5RSimClient
     from c5r_sim_inference.protocol import record_batch_to_actions
@@ -108,20 +178,20 @@ def test_step_writes_action_batch_and_returns_matching_observations() -> None:
     )
     stream = C5RSimClient("grpc://unused", flight_client=flight_client).start_sim(
         task_id="task_11",
-        initial_state=np.zeros(2, dtype=np.float32),
+        initial_state=np.zeros((1, 2), dtype=np.float32),
         views=("overhead",),
         width=3,
         height=2,
         substeps=1,
     )
 
-    observation = stream.step(np.ones((3, 2), dtype=np.float32))
+    observation = stream.step(np.ones((3, 1, 2), dtype=np.float32))
     action_request = record_batch_to_actions(
         flight_client.writer.batches[1], expected_sim_id="sim-1"
     )
 
     assert action_request.start_step_index == 1
-    assert action_request.actions.shape == (3, 2)
+    assert action_request.actions.shape == (3, 1, 2)
     assert action_request.actions.dtype == np.float32
     assert observation.step_indices.tolist() == [1, 2, 3]
     assert observation.camera.shape[0] == 3
@@ -140,23 +210,20 @@ def test_stream_request_batches_use_one_arrow_schema() -> None:
     )
     stream = C5RSimClient("grpc://unused", flight_client=flight_client).start_sim(
         task_id="task_11",
-        initial_state=np.zeros(2, dtype=np.float32),
+        initial_state=np.zeros((1, 2), dtype=np.float32),
         views=("overhead",),
         width=3,
         height=2,
         substeps=1,
     )
 
-    stream.step(np.ones((2, 2), dtype=np.float32))
+    stream.step(np.ones((2, 1, 2), dtype=np.float32))
 
     assert flight_client.writer.batches[0].schema == flight_client.writer.batches[1].schema
     assert record_batch_to_new_sim(flight_client.writer.batches[0]).task_id == "task_11"
-    assert (
-        record_batch_to_actions(flight_client.writer.batches[1], expected_sim_id="sim-1")
-        .actions
-        .shape
-        == (2, 2)
-    )
+    assert record_batch_to_actions(
+        flight_client.writer.batches[1], expected_sim_id="sim-1"
+    ).actions.shape == (2, 1, 2)
 
 
 def test_step_rejects_mismatched_response_row_count() -> None:
@@ -170,7 +237,7 @@ def test_step_rejects_mismatched_response_row_count() -> None:
     )
     stream = C5RSimClient("grpc://unused", flight_client=flight_client).start_sim(
         task_id="task_11",
-        initial_state=np.zeros(2, dtype=np.float32),
+        initial_state=np.zeros((1, 2), dtype=np.float32),
         views=("overhead",),
         width=3,
         height=2,
@@ -178,7 +245,7 @@ def test_step_rejects_mismatched_response_row_count() -> None:
     )
 
     with pytest.raises(ValueError, match="observation row count"):
-        stream.step(np.ones((2, 2), dtype=np.float32))
+        stream.step(np.ones((2, 1, 2), dtype=np.float32))
 
 
 def test_start_sim_requires_numpy_initial_state() -> None:
@@ -209,7 +276,7 @@ def test_step_requires_numpy_actions() -> None:
     )
     stream = C5RSimClient("grpc://unused", flight_client=flight_client).start_sim(
         task_id="task_11",
-        initial_state=np.zeros(2, dtype=np.float32),
+        initial_state=np.zeros((1, 2), dtype=np.float32),
         views=("overhead",),
         width=3,
         height=2,
@@ -231,7 +298,7 @@ def test_step_rejects_mismatched_response_sim_id() -> None:
     )
     stream = C5RSimClient("grpc://unused", flight_client=flight_client).start_sim(
         task_id="task_11",
-        initial_state=np.zeros(2, dtype=np.float32),
+        initial_state=np.zeros((1, 2), dtype=np.float32),
         views=("overhead",),
         width=3,
         height=2,
@@ -239,7 +306,7 @@ def test_step_rejects_mismatched_response_sim_id() -> None:
     )
 
     with pytest.raises(ValueError, match="observation sim_id"):
-        stream.step(np.ones((1, 2), dtype=np.float32))
+        stream.step(np.ones((1, 1, 2), dtype=np.float32))
 
 
 def test_context_manager_closes_writer_reader_and_client() -> None:
@@ -250,7 +317,7 @@ def test_context_manager_closes_writer_reader_and_client() -> None:
 
     with client.start_sim(
         task_id="task_11",
-        initial_state=np.zeros(2, dtype=np.float32),
+        initial_state=np.zeros((1, 2), dtype=np.float32),
         views=("overhead",),
         width=3,
         height=2,

@@ -11,10 +11,10 @@ def test_observation_from_batch_preserves_numpy_arrays() -> None:
         sim_id="sim-1",
         step_indices=np.array([1, 2], dtype=np.int64),
         view_names=("overhead",),
-        camera=np.zeros((2, 1, 3, 4, 3), dtype=np.uint8),
-        qpos=np.ones((2, 4), dtype=np.float32),
-        qvel=np.ones((2, 4), dtype=np.float32) * 2,
-        ctrl=np.ones((2, 4), dtype=np.float32) * 3,
+        camera=np.zeros((2, 1, 1, 3, 4, 3), dtype=np.uint8),
+        qpos=np.ones((2, 1, 4), dtype=np.float32),
+        qvel=np.ones((2, 1, 4), dtype=np.float32) * 2,
+        ctrl=np.ones((2, 1, 4), dtype=np.float32) * 3,
     )
 
     observation = Observation.from_batch(batch)
@@ -24,6 +24,6 @@ def test_observation_from_batch_preserves_numpy_arrays() -> None:
     assert observation.step_indices.dtype == np.int64
     assert observation.camera.dtype == np.uint8
     assert observation.qpos.dtype == np.float32
-    assert observation.camera.shape == (2, 1, 3, 4, 3)
+    assert observation.camera.shape == (2, 1, 1, 3, 4, 3)
     assert observation.camera.flags.c_contiguous
-    np.testing.assert_array_equal(observation.ctrl, np.ones((2, 4), dtype=np.float32) * 3)
+    np.testing.assert_array_equal(observation.ctrl, np.ones((2, 1, 4), dtype=np.float32) * 3)
