@@ -182,7 +182,8 @@ def test_step_writes_action_batch_and_returns_matching_observations() -> None:
         substeps=1,
     )
 
-    observation = stream.step(np.ones((3, 1, 2), dtype=np.float32))
+    actions = np.arange(6, dtype=np.float32).reshape(1, 3, 2)
+    observation = stream.step(actions)
     action_request = record_batch_to_actions(
         flight_client.writer.batches[1], expected_sim_id="sim-1"
     )
@@ -190,6 +191,7 @@ def test_step_writes_action_batch_and_returns_matching_observations() -> None:
     assert action_request.start_step_index == 1
     assert action_request.actions.shape == (3, 1, 2)
     assert action_request.actions.dtype == np.float32
+    np.testing.assert_array_equal(action_request.actions, np.swapaxes(actions, 0, 1))
     assert observation.step_indices.tolist() == [1, 2, 3]
     assert observation.camera.shape[0] == 3
     assert stream.next_step_index == 4
@@ -214,7 +216,7 @@ def test_stream_request_batches_use_one_arrow_schema() -> None:
         substeps=1,
     )
 
-    stream.step(np.ones((2, 1, 2), dtype=np.float32))
+    stream.step(np.ones((1, 2, 2), dtype=np.float32))
 
     assert flight_client.writer.batches[0].schema == flight_client.writer.batches[1].schema
     assert record_batch_to_new_sim(flight_client.writer.batches[0]).task_id == "task_11"
@@ -242,7 +244,7 @@ def test_step_rejects_mismatched_response_row_count() -> None:
     )
 
     with pytest.raises(ValueError, match="observation row count"):
-        stream.step(np.ones((2, 1, 2), dtype=np.float32))
+        stream.step(np.ones((1, 2, 2), dtype=np.float32))
 
 
 def test_start_sim_requires_numpy_initial_state() -> None:

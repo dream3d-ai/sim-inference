@@ -20,7 +20,7 @@ with client.start_sim(
     physics_randomization=True,
 ) as sim:
     initial = sim.initial_observation
-    observations = sim.step(np.zeros((8, 1, 14), dtype=np.float32))
+    observations = sim.step(np.zeros((1, 8, 14), dtype=np.float32))
 ```
 
 Inputs are NumPy arrays. Callers are responsible for converting tensors or other
@@ -31,6 +31,9 @@ Observations are returned as NumPy arrays:
 - `camera`: `np.uint8`, shape `(step, env, views, height, width, 3)`
 - `qpos`, `qvel`, `ctrl`: `np.float32`
 - `step_indices`: `np.int64`
+
+`SimulationStream.step(...)` accepts actions as `(env, step, action_dim)`.
+Returned observations remain step-major: `(step, env, ...)`.
 
 Set `physics_randomization=True` to sample the default server-owned rack/tube
 physics profile, or pass `"low"`, `"default"`, or `"high"`. Profiles own the

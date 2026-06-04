@@ -130,21 +130,22 @@ class SimulationStream:
         """Send a variable-size action batch and read the matching observations.
 
         Args:
-            actions: Rank-3 NumPy array with shape ``(step, env, action_dim)``.
+            actions: Rank-3 NumPy array with shape ``(env, step, action_dim)``.
 
         Returns:
-            An ``Observation`` whose leading dimension matches the action rows sent.
+            An ``Observation`` whose leading dimension matches the requested steps.
         """
         _require_numpy_array(actions, name="actions")
+        action_values = _env_major_actions_to_step_major(actions)
         action_batch = client_request_action_batch_to_record_batch(
             sim_id=self.sim_id,
             start_step_index=self.next_step_index,
-            actions=actions,
+            actions=action_values,
             schema=self.request_schema,
         )
         self.writer.write_batch(action_batch)
         observation = _read_observation(self.reader)
-        row_count = int(actions.shape[0])
+        row_count = int(action_values.shape[0])
         if observation.sim_id != self.sim_id:
             raise ValueError(
                 f"observation sim_id {observation.sim_id!r} does not match {self.sim_id!r}"
@@ -216,3 +217,11 @@ def _require_numpy_array(values: Any, *, name: str) -> None:
     """Require SDK callers to pass NumPy arrays without framework conversion."""
     if not isinstance(values, np.ndarray):
         raise TypeError(f"{name} must be a numpy.ndarray")
+
+
+def _env_major_actions_to_step_major(actions: np.ndarray) -> np.ndarray:
+    """Convert SDK action batches from (env, step, action_dim) to protocol shape."""
+
+    if actions.ndim != 3:
+        raise ValueError("actions must have shape (env, step, action_dim)")
+    return np.array(np.swapaxes(actions, 0, 1), dtype=actions.dtype, order="C", copy=True)

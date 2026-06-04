@@ -59,7 +59,7 @@ def iter_action_batches(
     action_scale: float,
     seed: int,
 ) -> Iterator[np.ndarray]:
-    """Yield batched action arrays for each simulated frame after the initial state."""
+    """Yield env-major action arrays for each simulated frame after the initial state."""
 
     if frame_count < 1:
         raise ValueError("frame_count must be >= 1")
@@ -77,12 +77,12 @@ def iter_action_batches(
     while remaining > 0:
         rows = min(batch_size, remaining)
         if action_mode == "zeros":
-            actions = np.zeros((rows, env_count, action_dim), dtype=np.float32)
+            actions = np.zeros((env_count, rows, action_dim), dtype=np.float32)
         elif action_mode == "random":
             actions = rng.uniform(
                 low=-action_scale,
                 high=action_scale,
-                size=(rows, env_count, action_dim),
+                size=(env_count, rows, action_dim),
             ).astype(np.float32)
         else:
             raise ValueError(f"unsupported action_mode: {action_mode!r}")
