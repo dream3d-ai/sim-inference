@@ -1,0 +1,78 @@
+# Python-generated files
+*/__pycache__/
+__pycache__/
+*.py[oc]
+.ruff_cache
+**/__pycache__/
+
+/build/
+/dist/
+/wheels/
+*.egg-info
+**/bin/
+
+# Virtual environments
+.venv
+**/.venv/**
+
+# Secrets
+*.env
+
+wandb/
+
+# Media
+*.gif
+*.mp4
+*.png
+*.jpg
+*.jpeg
+*.webp
+
+## Golang
+# If you prefer the allow list template instead of the deny list, see community template:
+# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
+#
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Code coverage profiles and other test artifacts
+*.out
+coverage.*
+*.coverprofile
+profile.cov
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+
+# Terraform
+# Local .terraform directories
+**/.terraform/*
+
+# Ignore variables files
+*.auto.tfvars
+
+# Ignore override files
+*.tfoverride
+
+# Ignore environment-specific files
+.envrc
+
+# Ignore CLI configuration files
+.terraformrc
+terraform.rc
+
+tmp/
+outputs/
+docs/
