@@ -29,3 +29,9 @@ Observations are returned as NumPy arrays:
 - `camera`: `np.uint8`, shape `(batch, views, height, width, 3)`
 - `qpos`, `qvel`, `ctrl`: `np.float32`
 - `step_indices`: `np.int64`
+
+## Installation
+
+```bash
+uv pip install git+https://github.com/dream3d-ai/sim-inference.git
+```
