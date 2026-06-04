@@ -205,6 +205,14 @@ def main(
         min=1,
         help="Simulation substeps to advance for each action.",
     ),
+    scene_seed: int = typer.Option(
+        0,
+        help="Scene seed used for server-side scene and physics randomization.",
+    ),
+    physics_randomization: str = typer.Option(
+        "none",
+        help="Physics randomization profile: low, default, high, or none.",
+    ),
     fps: float = typer.Option(
         10.0,
         min=0.0,
@@ -243,6 +251,11 @@ def main(
             fill_value=float(initial_state_value),
             dtype=np.float32,
         )
+        physics_profile = (
+            None
+            if physics_randomization.lower() in {"", "none", "false", "off"}
+            else physics_randomization
+        )
         with client.start_sim(
             task_id=task_id,
             initial_state=initial_state,
@@ -250,6 +263,8 @@ def main(
             width=width,
             height=height,
             substeps=substeps,
+            scene_seed=scene_seed,
+            physics_randomization=physics_profile,
             action_dim=action_dim,
         ) as stream:
             typer.echo(f"started sim {stream.sim_id} from task {task_id!r}")
