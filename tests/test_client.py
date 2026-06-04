@@ -96,32 +96,29 @@ def test_start_sim_writes_new_sim_and_reads_initial_observation() -> None:
     assert request.views == ("overhead",)
 
 
-def test_start_sim_writes_scene_options() -> None:
+def test_start_sim_writes_physics_randomization_options() -> None:
     from c5r_sim_inference.client import C5RSimClient
     from c5r_sim_inference.protocol import record_batch_to_new_sim
 
     flight_client = FakeFlightClient([_observation_batch(sim_id="sim-1", start=0, rows=1)])
 
     C5RSimClient("grpc://unused", flight_client=flight_client).start_sim(
-        task_id="task_12",
+        task_id="task_11",
         initial_state=np.zeros((1, 2), dtype=np.float32),
         views=(),
         width=3,
         height=2,
         substeps=1,
         scene_seed=17,
-        tube_mode="table",
-        tube_mass_kg=0.02,
+        physics_randomization="low",
     )
 
     request = record_batch_to_new_sim(flight_client.writer.batches[0])
 
     assert request.scene_options is not None
     assert request.scene_options["seed"] == 17
-    assert request.scene_options["physics"]["rack"]["tube_mass_kg"] == 0.02
-    assert (
-        request.scene_options["physics"]["randomization"]["placement"]["tube_mode"] == "table"
-    )
+    assert request.scene_options["physics"] == {}
+    assert request.scene_options["physics_randomization"] == {"profile": "low"}
 
 
 def test_start_sim_writes_physics_randomization_profile() -> None:

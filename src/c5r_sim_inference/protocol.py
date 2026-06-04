@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 from dataclasses import dataclass
 from typing import Any
 
@@ -94,28 +95,6 @@ def new_sim_batch_to_record_batch(
     substeps: int,
     scene_seed: int | None = None,
     physics_randomization: bool | str | None = None,
-    rack_dynamic: bool = True,
-    tube_radius: float | None = None,
-    tube_half_length: float | None = None,
-    tube_mass_kg: float | None = None,
-    rack_contact_friction: tuple[float, float, float] = (0.65, 0.006, 0.0001),
-    rack_contact_solref: tuple[float, float] = (0.006, 1.0),
-    rack_contact_solimp: tuple[float, float, float] = (0.9, 0.95, 0.001),
-    tube_contact_friction: tuple[float, float, float] = (0.8, 0.006, 0.0001),
-    tube_contact_solref: tuple[float, float] = (0.006, 1.0),
-    tube_contact_solimp: tuple[float, float, float] = (0.9, 0.95, 0.001),
-    table_x_min: float = -0.08,
-    table_x_max: float = 0.26,
-    table_y_min: float = -0.20,
-    table_y_max: float = 0.24,
-    table_top_z: float = 0.760,
-    rack_yaw_range: tuple[float, float] = (-3.141592653589793, 3.141592653589793),
-    tube_starts_in_rack_hole: bool | None = None,
-    tube_mode: str | None = None,
-    tube_hole_index: int | str | None = "random",
-    tube_table_spawn_height_m: float = 0.005,
-    tube_table_roll_range: tuple[float, float] = (1.25, 1.9),
-    tube_table_pitch_range: tuple[float, float] = (-0.35, 0.35),
 ) -> pa.RecordBatch:
     """Build a standalone ``new_sim`` record batch.
 
@@ -129,31 +108,8 @@ def new_sim_batch_to_record_batch(
     height = _positive_int(height, name="height")
     substeps = _positive_int(substeps, name="substeps")
     scene_options = _scene_options_from_kwargs(
-        task_id=task_id,
         scene_seed=scene_seed,
         physics_randomization=physics_randomization,
-        rack_dynamic=rack_dynamic,
-        tube_radius=tube_radius,
-        tube_half_length=tube_half_length,
-        tube_mass_kg=tube_mass_kg,
-        rack_contact_friction=rack_contact_friction,
-        rack_contact_solref=rack_contact_solref,
-        rack_contact_solimp=rack_contact_solimp,
-        tube_contact_friction=tube_contact_friction,
-        tube_contact_solref=tube_contact_solref,
-        tube_contact_solimp=tube_contact_solimp,
-        table_x_min=table_x_min,
-        table_x_max=table_x_max,
-        table_y_min=table_y_min,
-        table_y_max=table_y_max,
-        table_top_z=table_top_z,
-        rack_yaw_range=rack_yaw_range,
-        tube_starts_in_rack_hole=tube_starts_in_rack_hole,
-        tube_mode=tube_mode,
-        tube_hole_index=tube_hole_index,
-        tube_table_spawn_height_m=tube_table_spawn_height_m,
-        tube_table_roll_range=tube_table_roll_range,
-        tube_table_pitch_range=tube_table_pitch_range,
     )
     state = np.asarray(initial_state)
     if state.ndim != 2:
@@ -265,28 +221,6 @@ def client_request_new_sim_batch_to_record_batch(
     action_shape: tuple[int, ...],
     scene_seed: int | None = None,
     physics_randomization: bool | str | None = None,
-    rack_dynamic: bool = True,
-    tube_radius: float | None = None,
-    tube_half_length: float | None = None,
-    tube_mass_kg: float | None = None,
-    rack_contact_friction: tuple[float, float, float] = (0.65, 0.006, 0.0001),
-    rack_contact_solref: tuple[float, float] = (0.006, 1.0),
-    rack_contact_solimp: tuple[float, float, float] = (0.9, 0.95, 0.001),
-    tube_contact_friction: tuple[float, float, float] = (0.8, 0.006, 0.0001),
-    tube_contact_solref: tuple[float, float] = (0.006, 1.0),
-    tube_contact_solimp: tuple[float, float, float] = (0.9, 0.95, 0.001),
-    table_x_min: float = -0.08,
-    table_x_max: float = 0.26,
-    table_y_min: float = -0.20,
-    table_y_max: float = 0.24,
-    table_top_z: float = 0.760,
-    rack_yaw_range: tuple[float, float] = (-3.141592653589793, 3.141592653589793),
-    tube_starts_in_rack_hole: bool | None = None,
-    tube_mode: str | None = None,
-    tube_hole_index: int | str | None = "random",
-    tube_table_spawn_height_m: float = 0.005,
-    tube_table_roll_range: tuple[float, float] = (1.25, 1.9),
-    tube_table_pitch_range: tuple[float, float] = (-0.35, 0.35),
 ) -> pa.RecordBatch:
     """Build the first request batch for a bidirectional Flight exchange.
 
@@ -300,31 +234,8 @@ def client_request_new_sim_batch_to_record_batch(
     substeps = _positive_int(substeps, name="substeps")
     action_shape = _validated_value_shape(action_shape, name="action_shape")
     scene_options = _scene_options_from_kwargs(
-        task_id=task_id,
         scene_seed=scene_seed,
         physics_randomization=physics_randomization,
-        rack_dynamic=rack_dynamic,
-        tube_radius=tube_radius,
-        tube_half_length=tube_half_length,
-        tube_mass_kg=tube_mass_kg,
-        rack_contact_friction=rack_contact_friction,
-        rack_contact_solref=rack_contact_solref,
-        rack_contact_solimp=rack_contact_solimp,
-        tube_contact_friction=tube_contact_friction,
-        tube_contact_solref=tube_contact_solref,
-        tube_contact_solimp=tube_contact_solimp,
-        table_x_min=table_x_min,
-        table_x_max=table_x_max,
-        table_y_min=table_y_min,
-        table_y_max=table_y_max,
-        table_top_z=table_top_z,
-        rack_yaw_range=rack_yaw_range,
-        tube_starts_in_rack_hole=tube_starts_in_rack_hole,
-        tube_mode=tube_mode,
-        tube_hole_index=tube_hole_index,
-        tube_table_spawn_height_m=tube_table_spawn_height_m,
-        tube_table_roll_range=tube_table_roll_range,
-        tube_table_pitch_range=tube_table_pitch_range,
     )
     state = np.asarray(initial_state)
     if state.ndim != 2:
@@ -774,113 +685,28 @@ def _metadata_scene_options(metadata: dict[str, Any]) -> dict[str, Any]:
 
 def _scene_options_from_kwargs(
     *,
-    task_id: str,
     scene_seed: int | None,
     physics_randomization: bool | str | None,
-    rack_dynamic: bool,
-    tube_radius: float | None,
-    tube_half_length: float | None,
-    tube_mass_kg: float | None,
-    rack_contact_friction: tuple[float, float, float],
-    rack_contact_solref: tuple[float, float],
-    rack_contact_solimp: tuple[float, float, float],
-    tube_contact_friction: tuple[float, float, float],
-    tube_contact_solref: tuple[float, float],
-    tube_contact_solimp: tuple[float, float, float],
-    table_x_min: float,
-    table_x_max: float,
-    table_y_min: float,
-    table_y_max: float,
-    table_top_z: float,
-    rack_yaw_range: tuple[float, float],
-    tube_starts_in_rack_hole: bool | None,
-    tube_mode: str | None,
-    tube_hole_index: int | str | None,
-    tube_table_spawn_height_m: float,
-    tube_table_roll_range: tuple[float, float],
-    tube_table_pitch_range: tuple[float, float],
 ) -> dict[str, Any]:
-    if scene_seed is None:
-        if physics_randomization not in (None, False):
-            raise ValueError("physics_randomization requires scene_seed")
+    randomization_option = _physics_randomization_option(physics_randomization)
+    if randomization_option is None:
+        if scene_seed is not None:
+            raise ValueError("scene_seed requires physics_randomization")
         return {}
+    return {
+        "kind": "rack_tube",
+        "seed": _randomization_seed(scene_seed),
+        "physics": {},
+        "physics_randomization": randomization_option,
+    }
+
+
+def _randomization_seed(scene_seed: int | None) -> int:
+    if scene_seed is None:
+        return secrets.randbits(63)
     if not isinstance(scene_seed, int) or isinstance(scene_seed, bool):
         raise ValueError("scene_seed must be an int")
-    resolved_tube_mode = tube_mode or _default_tube_mode(task_id)
-    if resolved_tube_mode not in {"rack-hole", "table"}:
-        raise ValueError("tube_mode must be 'rack-hole' or 'table'")
-    if tube_starts_in_rack_hole is None:
-        tube_starts_in_rack_hole = resolved_tube_mode == "rack-hole"
-    elif not isinstance(tube_starts_in_rack_hole, bool):
-        raise ValueError("tube_starts_in_rack_hole must be a bool")
-    if not isinstance(rack_dynamic, bool):
-        raise ValueError("rack_dynamic must be a bool")
-    radius, half_length, mass = _default_tube_spec(task_id)
-    options = {
-        "kind": "rack_tube",
-        "seed": scene_seed,
-        "physics": {
-            "rack_dynamic": rack_dynamic,
-            "rack": {
-                "tube_radius": _float_or_default(tube_radius, radius),
-                "tube_half_length": _float_or_default(tube_half_length, half_length),
-                "tube_mass_kg": _float_or_default(tube_mass_kg, mass),
-            },
-            "material": {
-                "rack_contact": {
-                    "friction": list(
-                        _float_tuple(rack_contact_friction, 3, "rack_contact_friction")
-                    ),
-                    "solref": list(_float_tuple(rack_contact_solref, 2, "rack_contact_solref")),
-                    "solimp": list(_float_tuple(rack_contact_solimp, 3, "rack_contact_solimp")),
-                },
-                "tube_contact": {
-                    "friction": list(
-                        _float_tuple(tube_contact_friction, 3, "tube_contact_friction")
-                    ),
-                    "solref": list(_float_tuple(tube_contact_solref, 2, "tube_contact_solref")),
-                    "solimp": list(_float_tuple(tube_contact_solimp, 3, "tube_contact_solimp")),
-                },
-            },
-            "randomization": {
-                "placement": {
-                    "table_bounds": {
-                        "x_min": float(table_x_min),
-                        "x_max": float(table_x_max),
-                        "y_min": float(table_y_min),
-                        "y_max": float(table_y_max),
-                    },
-                    "table_top_z": float(table_top_z),
-                    "rack_yaw_range": list(_float_tuple(rack_yaw_range, 2, "rack_yaw_range")),
-                    "tube_starts_in_rack_hole": tube_starts_in_rack_hole,
-                    "tube_mode": resolved_tube_mode,
-                    "tube_hole_index": _tube_hole_index(tube_hole_index),
-                    "tube_table_spawn_height_m": float(tube_table_spawn_height_m),
-                    "tube_table_roll_range": list(
-                        _float_tuple(tube_table_roll_range, 2, "tube_table_roll_range")
-                    ),
-                    "tube_table_pitch_range": list(
-                        _float_tuple(tube_table_pitch_range, 2, "tube_table_pitch_range")
-                    ),
-                },
-                "sampled": {},
-            },
-        },
-    }
-    randomization_option = _physics_randomization_option(physics_randomization)
-    if randomization_option is not None:
-        options["physics_randomization"] = randomization_option
-    return options
-
-
-def _default_tube_mode(task_id: str) -> str:
-    return "table" if task_id in {"task_12", "task_14"} else "rack-hole"
-
-
-def _default_tube_spec(task_id: str) -> tuple[float, float, float]:
-    if task_id in {"task_13", "task_14"}:
-        return 0.0085, 0.059, 0.015
-    return 0.0062, 0.0335, 0.011
+    return scene_seed
 
 
 def _physics_randomization_option(value: bool | str | None) -> dict[str, str] | None:
@@ -891,24 +717,6 @@ def _physics_randomization_option(value: bool | str | None) -> dict[str, str] | 
     if isinstance(value, str) and value:
         return {"profile": value}
     raise ValueError("physics_randomization must be a bool or non-empty profile string")
-
-
-def _float_or_default(value: float | None, default: float) -> float:
-    return float(default if value is None else value)
-
-
-def _float_tuple(values: tuple[float, ...], length: int, name: str) -> tuple[float, ...]:
-    if not isinstance(values, (list, tuple)) or len(values) != length:
-        raise ValueError(f"{name} must contain {length} values")
-    return tuple(float(value) for value in values)
-
-
-def _tube_hole_index(value: int | str | None) -> int | str | None:
-    if value is None or value == "random":
-        return value
-    if isinstance(value, int) and not isinstance(value, bool):
-        return value
-    raise ValueError("tube_hole_index must be an int, 'random', or None")
 
 
 def _require_columns(batch: pa.RecordBatch, columns: tuple[str, ...]) -> None:

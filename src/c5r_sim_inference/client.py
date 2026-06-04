@@ -47,28 +47,6 @@ class C5RSimClient:
         action_dim: int | None = None,
         scene_seed: int | None = None,
         physics_randomization: bool | str | None = None,
-        rack_dynamic: bool = True,
-        tube_radius: float | None = None,
-        tube_half_length: float | None = None,
-        tube_mass_kg: float | None = None,
-        rack_contact_friction: tuple[float, float, float] = (0.65, 0.006, 0.0001),
-        rack_contact_solref: tuple[float, float] = (0.006, 1.0),
-        rack_contact_solimp: tuple[float, float, float] = (0.9, 0.95, 0.001),
-        tube_contact_friction: tuple[float, float, float] = (0.8, 0.006, 0.0001),
-        tube_contact_solref: tuple[float, float] = (0.006, 1.0),
-        tube_contact_solimp: tuple[float, float, float] = (0.9, 0.95, 0.001),
-        table_x_min: float = -0.08,
-        table_x_max: float = 0.26,
-        table_y_min: float = -0.20,
-        table_y_max: float = 0.24,
-        table_top_z: float = 0.760,
-        rack_yaw_range: tuple[float, float] = (-3.141592653589793, 3.141592653589793),
-        tube_starts_in_rack_hole: bool | None = None,
-        tube_mode: str | None = None,
-        tube_hole_index: int | str | None = "random",
-        tube_table_spawn_height_m: float = 0.005,
-        tube_table_roll_range: tuple[float, float] = (1.25, 1.9),
-        tube_table_pitch_range: tuple[float, float] = (-0.35, 0.35),
     ) -> SimulationStream:
         """Start one interactive simulation stream.
 
@@ -84,7 +62,10 @@ class C5RSimClient:
             height: Render height in pixels.
             substeps: Physics substeps to run for each action.
             action_dim: Optional action width. Defaults to ``initial_state.shape[1]``.
-            scene_seed: Optional seed enabling randomized rack/tube scene generation.
+            scene_seed: Optional reproducibility seed for physics randomization.
+            physics_randomization: Server-owned physics profile. ``True`` uses
+                the default profile; strings select named profiles such as
+                ``"low"``, ``"default"``, or ``"high"``.
 
         Returns:
             A live ``SimulationStream``. Close it when finished, or use it as a
@@ -112,28 +93,6 @@ class C5RSimClient:
             action_shape=(int(initial_state.shape[0]), action_dim),
             scene_seed=scene_seed,
             physics_randomization=physics_randomization,
-            rack_dynamic=rack_dynamic,
-            tube_radius=tube_radius,
-            tube_half_length=tube_half_length,
-            tube_mass_kg=tube_mass_kg,
-            rack_contact_friction=rack_contact_friction,
-            rack_contact_solref=rack_contact_solref,
-            rack_contact_solimp=rack_contact_solimp,
-            tube_contact_friction=tube_contact_friction,
-            tube_contact_solref=tube_contact_solref,
-            tube_contact_solimp=tube_contact_solimp,
-            table_x_min=table_x_min,
-            table_x_max=table_x_max,
-            table_y_min=table_y_min,
-            table_y_max=table_y_max,
-            table_top_z=table_top_z,
-            rack_yaw_range=rack_yaw_range,
-            tube_starts_in_rack_hole=tube_starts_in_rack_hole,
-            tube_mode=tube_mode,
-            tube_hole_index=tube_hole_index,
-            tube_table_spawn_height_m=tube_table_spawn_height_m,
-            tube_table_roll_range=tube_table_roll_range,
-            tube_table_pitch_range=tube_table_pitch_range,
         )
         _begin_if_available(writer, initial_batch.schema)
         writer.write_batch(initial_batch)

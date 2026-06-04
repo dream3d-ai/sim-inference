@@ -90,5 +90,5 @@ def test_demo_uses_start_sim_context_manager() -> None:
 def test_demo_passes_physics_randomization_to_start_sim() -> None:
     source = _demo_source()
 
-    assert "scene_seed=scene_seed" in source
+    assert "scene_seed=scene_seed if physics_profile is not None else None" in source
     assert "physics_randomization=physics_profile" in source

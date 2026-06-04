@@ -263,7 +263,7 @@ def main(
             width=width,
             height=height,
             substeps=substeps,
-            scene_seed=scene_seed,
+            scene_seed=scene_seed if physics_profile is not None else None,
             physics_randomization=physics_profile,
             action_dim=action_dim,
         ) as stream:
