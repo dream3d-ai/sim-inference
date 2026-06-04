@@ -6,7 +6,6 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.flight as flight
 import pytest
-import torch
 
 
 class FakeWriter:
@@ -80,7 +79,7 @@ def test_start_sim_writes_new_sim_and_reads_initial_observation() -> None:
 
     stream = client.start_sim(
         task_id="task_11",
-        initial_state=torch.zeros(2),
+        initial_state=np.zeros(2, dtype=np.float32),
         views=("overhead",),
         width=3,
         height=2,
@@ -90,6 +89,7 @@ def test_start_sim_writes_new_sim_and_reads_initial_observation() -> None:
     assert stream.sim_id == "sim-1"
     assert stream.next_step_index == 1
     assert stream.initial_observation.step_indices.tolist() == [0]
+    assert stream.initial_observation.camera.dtype == np.uint8
     assert len(flight_client.writer.batches) == 1
     request = record_batch_to_new_sim(flight_client.writer.batches[0])
     assert request.task_id == "task_11"
@@ -108,20 +108,21 @@ def test_step_writes_action_batch_and_returns_matching_observations() -> None:
     )
     stream = C5RSimClient("grpc://unused", flight_client=flight_client).start_sim(
         task_id="task_11",
-        initial_state=torch.zeros(2),
+        initial_state=np.zeros(2, dtype=np.float32),
         views=("overhead",),
         width=3,
         height=2,
         substeps=1,
     )
 
-    observation = stream.step(torch.ones(3, 2))
+    observation = stream.step(np.ones((3, 2), dtype=np.float32))
     action_request = record_batch_to_actions(
         flight_client.writer.batches[1], expected_sim_id="sim-1"
     )
 
     assert action_request.start_step_index == 1
     assert action_request.actions.shape == (3, 2)
+    assert action_request.actions.dtype == np.float32
     assert observation.step_indices.tolist() == [1, 2, 3]
     assert observation.camera.shape[0] == 3
     assert stream.next_step_index == 4
@@ -139,14 +140,14 @@ def test_stream_request_batches_use_one_arrow_schema() -> None:
     )
     stream = C5RSimClient("grpc://unused", flight_client=flight_client).start_sim(
         task_id="task_11",
-        initial_state=torch.zeros(2),
+        initial_state=np.zeros(2, dtype=np.float32),
         views=("overhead",),
         width=3,
         height=2,
         substeps=1,
     )
 
-    stream.step(torch.ones(2, 2))
+    stream.step(np.ones((2, 2), dtype=np.float32))
 
     assert flight_client.writer.batches[0].schema == flight_client.writer.batches[1].schema
     assert record_batch_to_new_sim(flight_client.writer.batches[0]).task_id == "task_11"
@@ -169,7 +170,7 @@ def test_step_rejects_mismatched_response_row_count() -> None:
     )
     stream = C5RSimClient("grpc://unused", flight_client=flight_client).start_sim(
         task_id="task_11",
-        initial_state=torch.zeros(2),
+        initial_state=np.zeros(2, dtype=np.float32),
         views=("overhead",),
         width=3,
         height=2,
@@ -177,7 +178,46 @@ def test_step_rejects_mismatched_response_row_count() -> None:
     )
 
     with pytest.raises(ValueError, match="observation row count"):
-        stream.step(torch.ones(2, 2))
+        stream.step(np.ones((2, 2), dtype=np.float32))
+
+
+def test_start_sim_requires_numpy_initial_state() -> None:
+    from c5r_sim_inference.client import C5RSimClient
+
+    flight_client = FakeFlightClient([_observation_batch(sim_id="sim-1", start=0, rows=1)])
+    client = C5RSimClient("grpc://unused", flight_client=flight_client)
+
+    with pytest.raises(TypeError, match="initial_state must be a numpy.ndarray"):
+        client.start_sim(
+            task_id="task_11",
+            initial_state=[0.0, 0.0],
+            views=("overhead",),
+            width=3,
+            height=2,
+            substeps=1,
+        )
+
+
+def test_step_requires_numpy_actions() -> None:
+    from c5r_sim_inference.client import C5RSimClient
+
+    flight_client = FakeFlightClient(
+        [
+            _observation_batch(sim_id="sim-1", start=0, rows=1),
+            _observation_batch(sim_id="sim-1", start=1, rows=1),
+        ]
+    )
+    stream = C5RSimClient("grpc://unused", flight_client=flight_client).start_sim(
+        task_id="task_11",
+        initial_state=np.zeros(2, dtype=np.float32),
+        views=("overhead",),
+        width=3,
+        height=2,
+        substeps=1,
+    )
+
+    with pytest.raises(TypeError, match="actions must be a numpy.ndarray"):
+        stream.step([[1.0, 1.0]])
 
 
 def test_step_rejects_mismatched_response_sim_id() -> None:
@@ -191,7 +231,7 @@ def test_step_rejects_mismatched_response_sim_id() -> None:
     )
     stream = C5RSimClient("grpc://unused", flight_client=flight_client).start_sim(
         task_id="task_11",
-        initial_state=torch.zeros(2),
+        initial_state=np.zeros(2, dtype=np.float32),
         views=("overhead",),
         width=3,
         height=2,
@@ -199,7 +239,7 @@ def test_step_rejects_mismatched_response_sim_id() -> None:
     )
 
     with pytest.raises(ValueError, match="observation sim_id"):
-        stream.step(torch.ones(1, 2))
+        stream.step(np.ones((1, 2), dtype=np.float32))
 
 
 def test_context_manager_closes_writer_reader_and_client() -> None:
@@ -210,7 +250,7 @@ def test_context_manager_closes_writer_reader_and_client() -> None:
 
     with client.start_sim(
         task_id="task_11",
-        initial_state=torch.zeros(2),
+        initial_state=np.zeros(2, dtype=np.float32),
         views=("overhead",),
         width=3,
         height=2,
@@ -228,4 +268,4 @@ def test_package_exports_public_api() -> None:
 
     assert sdk.C5RSimClient is not None
     assert sdk.SimulationStream is not None
-    assert sdk.TorchObservation is not None
+    assert sdk.Observation is not None

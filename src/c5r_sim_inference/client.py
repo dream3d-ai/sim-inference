@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.flight as flight
-import torch
 
 from .protocol import (
     client_request_action_batch_to_record_batch,
@@ -38,7 +38,7 @@ class C5RSimClient:
         self,
         *,
         task_id: str,
-        initial_state: torch.Tensor,
+        initial_state: np.ndarray,
         views: tuple[str, ...],
         width: int,
         height: int,
@@ -53,7 +53,7 @@ class C5RSimClient:
 
         Args:
             task_id: Server-configured task id used to resolve the scene.
-            initial_state: Rank-1 CPU/GPU PyTorch tensor containing the robot state.
+            initial_state: Rank-1 NumPy array containing the robot state.
             views: Camera view names to render for every observation.
             width: Render width in pixels.
             height: Render height in pixels.
@@ -64,17 +64,17 @@ class C5RSimClient:
             A live ``SimulationStream``. Close it when finished, or use it as a
             context manager.
         """
+        _require_numpy_array(initial_state, name="initial_state")
         writer, reader = self._client.do_exchange(
             flight.FlightDescriptor.for_command(b"c5r_sim")
         )
-        initial_state_values = initial_state.detach().contiguous().cpu().numpy()
         if action_dim is None:
-            action_dim = int(initial_state_values.shape[0])
+            action_dim = int(initial_state.shape[0])
         if action_dim <= 0:
             raise ValueError("action_dim must be positive")
         initial_batch = client_request_new_sim_batch_to_record_batch(
             task_id=task_id,
-            initial_state=initial_state_values,
+            initial_state=initial_state,
             views=views,
             width=width,
             height=height,
@@ -113,26 +113,25 @@ class SimulationStream:
     next_step_index: int = 1
     _closed: bool = False
 
-    def step(self, actions: torch.Tensor) -> Observation:
+    def step(self, actions: np.ndarray) -> Observation:
         """Send a variable-size action batch and read the matching observations.
 
         Args:
-            actions: Rank-2 PyTorch tensor with shape ``(batch, action_dim)``.
+            actions: Rank-2 NumPy array with shape ``(batch, action_dim)``.
 
         Returns:
-            A ``TorchObservation`` whose leading dimension matches the number of
-            action rows sent.
+            An ``Observation`` whose leading dimension matches the action rows sent.
         """
-        action_values = actions.detach().contiguous().cpu().numpy()
+        _require_numpy_array(actions, name="actions")
         action_batch = client_request_action_batch_to_record_batch(
             sim_id=self.sim_id,
             start_step_index=self.next_step_index,
-            actions=action_values,
+            actions=actions,
             schema=self.request_schema,
         )
         self.writer.write_batch(action_batch)
         observation = _read_observation(self.reader)
-        row_count = int(action_values.shape[0])
+        row_count = int(actions.shape[0])
         if observation.sim_id != self.sim_id:
             raise ValueError(
                 f"observation sim_id {observation.sim_id!r} does not match {self.sim_id!r}"
@@ -199,3 +198,9 @@ def _begin_if_available(writer: Any, schema: pa.Schema) -> None:
     begin = getattr(writer, "begin", None)
     if begin is not None:
         begin(schema)
+
+
+def _require_numpy_array(values: Any, *, name: str) -> None:
+    """Require SDK callers to pass NumPy arrays without framework conversion."""
+    if not isinstance(values, np.ndarray):
+        raise TypeError(f"{name} must be a numpy.ndarray")

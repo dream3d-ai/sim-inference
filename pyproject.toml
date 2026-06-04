@@ -1,7 +1,7 @@
 [project]
 name = "c5r-sim-inference"
 version = "0.1.0"
-description = "PyTorch client SDK for the C5R simulation Flight server"
+description = "NumPy client SDK for the C5R simulation Flight server"
 readme = "README.md"
 authors = [
     { name = "Tony Francis", email = "tony@dream3d.com" }
@@ -10,7 +10,6 @@ requires-python = ">=3.12"
 dependencies = [
     "numpy",
     "pyarrow>=24.0.0",
-    "torch",
 ]
 
 [build-system]

@@ -5,12 +5,12 @@
 #     "imageio[ffmpeg]",
 #     "numpy",
 #     "pillow",
-#     "torch",
+#     "tqdm",
 #     "typer",
 # ]
 #
 # [tool.uv.sources]
-# c5r-sim-inference = { path = "..", editable = true }
+# c5r-sim-inference = { git = "https://github.com/dream3d-ai/sim-inference.git" }
 # ///
 
 """Run a C5R Flight simulation and write a tiled observation video."""
@@ -23,11 +23,11 @@ from pathlib import Path
 
 import imageio.v2 as imageio
 import numpy as np
-import torch
 import typer
 from c5r_sim_inference import C5RSimClient
 from c5r_sim_inference.types import Observation
 from PIL import Image, ImageDraw
+from tqdm import tqdm
 
 DEFAULT_SERVER = "grpc://127.0.0.1:8815"
 DEFAULT_TASK_ID = "task_11"
@@ -57,8 +57,8 @@ def iter_action_batches(
     action_mode: ActionMode,
     action_scale: float,
     seed: int,
-) -> Iterator[torch.Tensor]:
-    """Yield batched action tensors for each simulated frame after the initial state."""
+) -> Iterator[np.ndarray]:
+    """Yield batched action arrays for each simulated frame after the initial state."""
 
     if frame_count < 1:
         raise ValueError("frame_count must be >= 1")
@@ -70,16 +70,17 @@ def iter_action_batches(
         raise ValueError("action_scale must be >= 0")
 
     remaining = frame_count - 1
-    generator = torch.Generator(device="cpu").manual_seed(seed)
+    rng = np.random.default_rng(seed)
     while remaining > 0:
         rows = min(batch_size, remaining)
         if action_mode == "zeros":
-            actions = torch.zeros((rows, action_dim), dtype=torch.float32)
+            actions = np.zeros((rows, action_dim), dtype=np.float32)
         elif action_mode == "random":
-            actions = (
-                torch.rand((rows, action_dim), generator=generator, dtype=torch.float32) * 2.0
-                - 1.0
-            ) * action_scale
+            actions = rng.uniform(
+                low=-action_scale,
+                high=action_scale,
+                size=(rows, action_dim),
+            ).astype(np.float32)
         else:
             raise ValueError(f"unsupported action_mode: {action_mode!r}")
         yield actions
@@ -103,14 +104,12 @@ def observation_grid_frame(
     if len(observation.view_names) != observation.camera.shape[1]:
         raise ValueError("observation view_names do not match camera view dimension")
 
-    camera = observation.camera[row].detach().to(device="cpu")
+    camera = observation.camera[row]
     images = {
-        view: np.ascontiguousarray(
-            camera[view_index].detach().to(device="cpu").contiguous().numpy()
-        )
+        view: np.ascontiguousarray(camera[view_index])
         for view_index, view in enumerate(observation.view_names)
     }
-    step_index = int(observation.step_indices[row].detach().to(device="cpu").item())
+    step_index = int(observation.step_indices[row].item())
     title = f"{title_prefix} sim={observation.sim_id[:8]} step={step_index}"
     return draw_grid_views(images, title=title, views=observation.view_names)
 
@@ -236,10 +235,10 @@ def main(
     try:
         # Setup Sim
         parsed_views = tuple(view.strip() for view in views.split(",") if view.strip())
-        initial_state = torch.full(
+        initial_state = np.full(
             (state_dim,),
             fill_value=float(initial_state_value),
-            dtype=torch.float32,
+            dtype=np.float32,
         )
         with client.start_sim(
             task_id=task_id,
@@ -252,7 +251,10 @@ def main(
         ) as stream:
             typer.echo(f"started sim {stream.sim_id} from task {task_id!r}")
 
-            with imageio.get_writer(output, fps=fps, macro_block_size=1) as writer:
+            with (
+                imageio.get_writer(output, fps=fps, macro_block_size=1) as writer,
+                tqdm(total=frames, unit="frame") as progress,
+            ):
                 # Write initial observation to video
                 writer.append_data(
                     observation_grid_frame(
@@ -262,6 +264,7 @@ def main(
                     )
                 )
                 frames_written += 1
+                progress.update(1)
 
                 # Generate action batches and write to video
                 for actions in iter_action_batches(
@@ -282,6 +285,7 @@ def main(
                             )
                         )
                         frames_written += 1
+                        progress.update(1)
             typer.echo(f"wrote {frames_written} grid frames to {output}")
     finally:
         client.close()

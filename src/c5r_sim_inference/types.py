@@ -3,40 +3,36 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-import torch
 
 from .protocol import ObservationBatch
 
 
 @dataclass(frozen=True)
 class Observation:
-    """PyTorch view of a simulation observation batch."""
+    """NumPy view of a simulation observation batch."""
 
     sim_id: str
-    step_indices: torch.Tensor
+    step_indices: np.ndarray
     view_names: tuple[str, ...]
-    camera: torch.Tensor
-    qpos: torch.Tensor
-    qvel: torch.Tensor
-    ctrl: torch.Tensor
+    camera: np.ndarray
+    qpos: np.ndarray
+    qvel: np.ndarray
+    ctrl: np.ndarray
 
     @classmethod
     def from_batch(cls, batch: ObservationBatch) -> Observation:
-        """Convert a NumPy/Arrow protocol observation into PyTorch tensors."""
+        """Convert a protocol observation into contiguous NumPy arrays."""
         return cls(
             sim_id=batch.sim_id,
-            step_indices=_torch_from_numpy(batch.step_indices),
+            step_indices=_contiguous_array(batch.step_indices),
             view_names=batch.view_names,
-            camera=_torch_from_numpy(batch.camera),
-            qpos=_torch_from_numpy(batch.qpos),
-            qvel=_torch_from_numpy(batch.qvel),
-            ctrl=_torch_from_numpy(batch.ctrl),
+            camera=_contiguous_array(batch.camera),
+            qpos=_contiguous_array(batch.qpos),
+            qvel=_contiguous_array(batch.qvel),
+            ctrl=_contiguous_array(batch.ctrl),
         )
 
 
-def _torch_from_numpy(values: np.ndarray) -> torch.Tensor:
-    """Create a PyTorch tensor from a contiguous writeable NumPy array."""
-    array = np.ascontiguousarray(values)
-    if not array.flags.writeable:
-        array = array.copy()
-    return torch.from_numpy(array)
+def _contiguous_array(values: np.ndarray) -> np.ndarray:
+    """Return a C-contiguous NumPy array view or copy."""
+    return np.ascontiguousarray(values)

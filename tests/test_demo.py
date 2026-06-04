@@ -22,6 +22,11 @@ def _demo_source_tree() -> ast.AST:
     return ast.parse(path.read_text())
 
 
+def _demo_source() -> str:
+    path = Path(__file__).parents[1] / "examples" / "demo.py"
+    return path.read_text()
+
+
 def test_demo_cli_uses_typer_and_exposes_existing_options() -> None:
     demo = _load_demo_module()
 
@@ -44,6 +49,23 @@ def test_demo_cli_uses_typer_and_exposes_existing_options() -> None:
     assert "views to render." in result.output
     assert "Action generation mode" in result.output
     assert "for simulated steps." in result.output
+
+
+def test_demo_declares_and_uses_tqdm_progress() -> None:
+    source = _demo_source()
+    tree = ast.parse(source)
+
+    uses_tqdm_call = any(
+        isinstance(node, ast.Call)
+        and (
+            (isinstance(node.func, ast.Name) and node.func.id == "tqdm")
+            or (isinstance(node.func, ast.Attribute) and node.func.attr == "tqdm")
+        )
+        for node in ast.walk(tree)
+    )
+
+    assert '"tqdm"' in source
+    assert uses_tqdm_call
 
 
 def test_demo_uses_start_sim_context_manager() -> None:
