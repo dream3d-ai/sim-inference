@@ -22,7 +22,7 @@ class NewSimRequest:
     views: tuple[str, ...]
     width: int
     height: int
-    substeps: int
+    physics_dt: float
     scene_options: dict[str, Any] | None = None
 
 
@@ -92,7 +92,7 @@ def new_sim_batch_to_record_batch(
     views: tuple[str, ...] = DEFAULT_VIEW_NAMES,
     width: int,
     height: int,
-    substeps: int,
+    physics_dt: float,
     scene_seed: int | None = None,
     physics_randomization: bool | str | None = None,
 ) -> pa.RecordBatch:
@@ -106,7 +106,7 @@ def new_sim_batch_to_record_batch(
     views = _metadata_views({"views": views}, default_if_missing=False)
     width = _positive_int(width, name="width")
     height = _positive_int(height, name="height")
-    substeps = _positive_int(substeps, name="substeps")
+    physics_dt = _positive_float(physics_dt, name="physics_dt")
     scene_options = _scene_options_from_kwargs(
         scene_seed=scene_seed,
         physics_randomization=physics_randomization,
@@ -132,7 +132,7 @@ def new_sim_batch_to_record_batch(
             views=list(views),
             width=width,
             height=height,
-            substeps=substeps,
+            physics_dt=physics_dt,
             scene_options=scene_options,
             tensors={"initial_state": _tensor_metadata(row_state)},
         ),
@@ -168,7 +168,7 @@ def record_batch_to_new_sim(batch: pa.RecordBatch) -> NewSimRequest:
         views=_metadata_views(metadata, default_if_missing=False),
         width=_positive_int(metadata.get("width"), name="width"),
         height=_positive_int(metadata.get("height"), name="height"),
-        substeps=_positive_int(metadata.get("substeps"), name="substeps"),
+        physics_dt=_metadata_physics_dt(metadata),
         scene_options=_metadata_scene_options(metadata),
     )
 
@@ -217,7 +217,7 @@ def client_request_new_sim_batch_to_record_batch(
     views: tuple[str, ...] = DEFAULT_VIEW_NAMES,
     width: int,
     height: int,
-    substeps: int,
+    physics_dt: float,
     action_shape: tuple[int, ...],
     scene_seed: int | None = None,
     physics_randomization: bool | str | None = None,
@@ -231,7 +231,7 @@ def client_request_new_sim_batch_to_record_batch(
     views = _metadata_views({"views": views}, default_if_missing=False)
     width = _positive_int(width, name="width")
     height = _positive_int(height, name="height")
-    substeps = _positive_int(substeps, name="substeps")
+    physics_dt = _positive_float(physics_dt, name="physics_dt")
     action_shape = _validated_value_shape(action_shape, name="action_shape")
     scene_options = _scene_options_from_kwargs(
         scene_seed=scene_seed,
@@ -254,7 +254,7 @@ def client_request_new_sim_batch_to_record_batch(
         views=list(views),
         width=width,
         height=height,
-        substeps=substeps,
+        physics_dt=physics_dt,
         scene_options=scene_options,
         tensors={
             "initial_state": _tensor_metadata(row_state),
@@ -391,7 +391,7 @@ def _client_request_record_batch_to_new_sim(
         views=_metadata_views(metadata, default_if_missing=False),
         width=_positive_int(metadata.get("width"), name="width"),
         height=_positive_int(metadata.get("height"), name="height"),
-        substeps=_positive_int(metadata.get("substeps"), name="substeps"),
+        physics_dt=_metadata_physics_dt(metadata),
         scene_options=_metadata_scene_options(metadata),
     )
 
@@ -683,6 +683,12 @@ def _metadata_scene_options(metadata: dict[str, Any]) -> dict[str, Any]:
     return dict(options)
 
 
+def _metadata_physics_dt(metadata: dict[str, Any]) -> float:
+    if "physics_dt" in metadata:
+        return _positive_float(metadata["physics_dt"], name="physics_dt")
+    raise ValueError("physics_dt metadata is required")
+
+
 def _scene_options_from_kwargs(
     *,
     scene_seed: int | None,
@@ -740,6 +746,15 @@ def _positive_int(value: Any, *, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError(f"{name} must be a positive integer")
     return int(value)
+
+
+def _positive_float(value: Any, *, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a positive number")
+    parsed = float(value)
+    if not np.isfinite(parsed) or parsed <= 0.0:
+        raise ValueError(f"{name} must be a positive number")
+    return parsed
 
 
 def _non_negative_int(value: Any, *, name: str) -> int:

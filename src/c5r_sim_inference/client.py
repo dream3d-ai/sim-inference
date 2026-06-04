@@ -43,7 +43,7 @@ class C5RSimClient:
         views: tuple[str, ...] = DEFAULT_VIEW_NAMES,
         width: int,
         height: int,
-        substeps: int,
+        physics_dt: float = 1.0 / 30.0,
         action_dim: int | None = None,
         scene_seed: int | None = None,
         physics_randomization: bool | str | None = None,
@@ -51,7 +51,7 @@ class C5RSimClient:
         """Start one interactive simulation stream.
 
         The initial request sends the task id, explicit robot state, desired camera
-        views, render size, and simulation substep count. The server responds with
+        views, render size, and control-frame physics delta. The server responds with
         the first observation at step index ``0``.
 
         Args:
@@ -60,7 +60,7 @@ class C5RSimClient:
             views: Camera view names to render for every observation. Defaults to all views.
             width: Render width in pixels.
             height: Render height in pixels.
-            substeps: Physics substeps to run for each action.
+            physics_dt: Simulated seconds to advance for each action row.
             action_dim: Optional action width. Defaults to ``initial_state.shape[1]``.
             scene_seed: Optional reproducibility seed for physics randomization.
             physics_randomization: Server-owned physics profile. ``True`` uses
@@ -89,7 +89,7 @@ class C5RSimClient:
             views=views,
             width=width,
             height=height,
-            substeps=substeps,
+            physics_dt=physics_dt,
             action_shape=(int(initial_state.shape[0]), action_dim),
             scene_seed=scene_seed,
             physics_randomization=physics_randomization,

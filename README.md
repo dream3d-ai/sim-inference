@@ -15,7 +15,7 @@ with client.start_sim(
     views=("overhead",),
     width=320,
     height=240,
-    substeps=1,
+    physics_dt=1.0 / 30.0,
     scene_seed=10327,
     physics_randomization=True,
 ) as sim:

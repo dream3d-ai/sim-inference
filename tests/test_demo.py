@@ -44,8 +44,10 @@ def test_demo_cli_uses_typer_and_exposes_existing_options() -> None:
     assert "--task-id" in result.output
     assert "--batch-size" in result.output
     assert "--action-mode" in result.output
+    assert "--physics-dt" in result.output
     assert "--scene-seed" in result.output
-    assert "--physics-randomization" in result.output
+    assert "Physics randomization" in result.output
+    assert "--substeps" not in result.output
     assert "Flight server URI." in result.output
     assert "Comma-separated camera" in result.output
     assert "views to render." in result.output

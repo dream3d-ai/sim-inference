@@ -38,7 +38,7 @@ def test_new_sim_batch_roundtrip() -> None:
         views=("overhead", "side"),
         width=64,
         height=48,
-        substeps=3,
+        physics_dt=0.006,
     )
 
     assert batch.num_rows == 1
@@ -54,7 +54,7 @@ def test_new_sim_batch_roundtrip() -> None:
     assert request.views == ("overhead", "side")
     assert request.width == 64
     assert request.height == 48
-    assert request.substeps == 3
+    assert request.physics_dt == 0.006
     np.testing.assert_array_equal(
         request.initial_state, np.arange(4, dtype=np.float32).reshape(1, 4)
     )
@@ -72,7 +72,7 @@ def test_new_sim_batch_allows_empty_views_for_state_only_requests() -> None:
         views=(),
         width=64,
         height=48,
-        substeps=1,
+        physics_dt=1.0 / 30.0,
         action_shape=(1, 4),
     )
 
@@ -91,7 +91,7 @@ def test_client_request_new_sim_includes_physics_randomization_options() -> None
         views=(),
         width=64,
         height=48,
-        substeps=1,
+        physics_dt=1.0 / 30.0,
         action_shape=(1, 4),
         scene_seed=123,
         physics_randomization="low",
@@ -118,7 +118,7 @@ def test_client_request_new_sim_includes_physics_randomization_profile() -> None
         views=(),
         width=64,
         height=48,
-        substeps=1,
+        physics_dt=1.0 / 30.0,
         action_shape=(1, 4),
         scene_seed=123,
         physics_randomization=True,
@@ -142,7 +142,7 @@ def test_client_request_new_sim_generates_seed_for_physics_randomization() -> No
         views=(),
         width=64,
         height=48,
-        substeps=1,
+        physics_dt=1.0 / 30.0,
         action_shape=(1, 4),
         physics_randomization="high",
     )
@@ -165,7 +165,7 @@ def test_scene_seed_requires_physics_randomization() -> None:
             views=(),
             width=64,
             height=48,
-            substeps=1,
+            physics_dt=1.0 / 30.0,
             action_shape=(1, 4),
             scene_seed=123,
         )

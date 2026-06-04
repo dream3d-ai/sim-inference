@@ -200,10 +200,10 @@ def main(
         min=1,
         help="Rendered camera height in pixels.",
     ),
-    substeps: int = typer.Option(
-        1,
-        min=1,
-        help="Simulation substeps to advance for each action.",
+    physics_dt: float = typer.Option(
+        1.0 / 30.0,
+        min=1e-9,
+        help="Simulated seconds to advance for each action frame.",
     ),
     scene_seed: int = typer.Option(
         0,
@@ -262,7 +262,7 @@ def main(
             views=parsed_views,
             width=width,
             height=height,
-            substeps=substeps,
+            physics_dt=physics_dt,
             scene_seed=scene_seed if physics_profile is not None else None,
             physics_randomization=physics_profile,
             action_dim=action_dim,

@@ -83,7 +83,7 @@ def test_start_sim_writes_new_sim_and_reads_initial_observation() -> None:
         views=("overhead",),
         width=3,
         height=2,
-        substeps=1,
+        physics_dt=1.0 / 30.0,
     )
 
     assert stream.sim_id == "sim-1"
@@ -108,7 +108,7 @@ def test_start_sim_writes_physics_randomization_options() -> None:
         views=(),
         width=3,
         height=2,
-        substeps=1,
+        physics_dt=1.0 / 30.0,
         scene_seed=17,
         physics_randomization="low",
     )
@@ -133,7 +133,7 @@ def test_start_sim_writes_physics_randomization_profile() -> None:
         views=(),
         width=3,
         height=2,
-        substeps=1,
+        physics_dt=1.0 / 30.0,
         scene_seed=17,
         physics_randomization="default",
     )
@@ -155,7 +155,7 @@ def test_start_sim_defaults_to_all_views() -> None:
         initial_state=np.zeros((1, 2), dtype=np.float32),
         width=3,
         height=2,
-        substeps=1,
+        physics_dt=1.0 / 30.0,
     )
 
     request = record_batch_to_new_sim(flight_client.writer.batches[0])
@@ -179,7 +179,7 @@ def test_step_writes_action_batch_and_returns_matching_observations() -> None:
         views=("overhead",),
         width=3,
         height=2,
-        substeps=1,
+        physics_dt=1.0 / 30.0,
     )
 
     actions = np.arange(6, dtype=np.float32).reshape(1, 3, 2)
@@ -213,7 +213,7 @@ def test_stream_request_batches_use_one_arrow_schema() -> None:
         views=("overhead",),
         width=3,
         height=2,
-        substeps=1,
+        physics_dt=1.0 / 30.0,
     )
 
     stream.step(np.ones((1, 2, 2), dtype=np.float32))
@@ -240,7 +240,7 @@ def test_step_rejects_mismatched_response_row_count() -> None:
         views=("overhead",),
         width=3,
         height=2,
-        substeps=1,
+        physics_dt=1.0 / 30.0,
     )
 
     with pytest.raises(ValueError, match="observation row count"):
@@ -260,7 +260,7 @@ def test_start_sim_requires_numpy_initial_state() -> None:
             views=("overhead",),
             width=3,
             height=2,
-            substeps=1,
+            physics_dt=1.0 / 30.0,
         )
 
 
@@ -279,7 +279,7 @@ def test_step_requires_numpy_actions() -> None:
         views=("overhead",),
         width=3,
         height=2,
-        substeps=1,
+        physics_dt=1.0 / 30.0,
     )
 
     with pytest.raises(TypeError, match="actions must be a numpy.ndarray"):
@@ -301,7 +301,7 @@ def test_step_rejects_mismatched_response_sim_id() -> None:
         views=("overhead",),
         width=3,
         height=2,
-        substeps=1,
+        physics_dt=1.0 / 30.0,
     )
 
     with pytest.raises(ValueError, match="observation sim_id"):
@@ -320,7 +320,7 @@ def test_context_manager_closes_writer_reader_and_client() -> None:
         views=("overhead",),
         width=3,
         height=2,
-        substeps=1,
+        physics_dt=1.0 / 30.0,
     ):
         pass
 
