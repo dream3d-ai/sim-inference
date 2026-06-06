@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
 import numpy as np
 import pyarrow as pa
 import pyarrow.flight as flight
@@ -20,9 +21,12 @@ class C5RSimClient:
 
     def __init__(
         self,
-        location: str | flight.Location,
+        location: str | flight.Location | None = None,
         *,
         flight_client: flight.FlightClient | None = None,
+        control_url: str | None = None,
+        http_client: Any | None = None,
+        flight_client_factory: Any | None = None,
     ) -> None:
         """Create a client for a Flight server location.
 
@@ -30,9 +34,35 @@ class C5RSimClient:
             location: Flight URI or prebuilt ``flight.Location``.
             flight_client: Optional injected client, mainly for tests. When omitted,
                 this instance owns and closes the created Flight client.
+            control_url: Optional FastAPI control server URL. When provided,
+                ``start_sim`` launches a fresh server session and connects to the
+                returned Flight URI.
+            http_client: Optional injected HTTP client, mainly for tests.
+            flight_client_factory: Optional factory for creating Flight clients.
         """
-        self._owns_client = flight_client is None
-        self._client = flight_client or flight.FlightClient(location)
+        if location is None and control_url is None and flight_client is None:
+            raise ValueError("location or control_url is required")
+        if control_url is not None and flight_client is not None:
+            raise ValueError("flight_client cannot be combined with control_url")
+        self._location = location
+        self._control_url = control_url.rstrip("/") if control_url is not None else None
+        self._flight_client_factory = flight_client_factory or flight.FlightClient
+        self._owns_client = flight_client is None and self._control_url is None
+        self._client = (
+            flight_client
+            if flight_client is not None
+            else (
+                None
+                if self._control_url is not None
+                else self._flight_client_factory(location)
+            )
+        )
+        self._owns_http_client = http_client is None and self._control_url is not None
+        self._http_client = (
+            http_client
+            if http_client is not None
+            else (httpx.Client() if self._control_url is not None else None)
+        )
 
     def start_sim(
         self,
@@ -65,7 +95,16 @@ class C5RSimClient:
             context manager.
         """
         _require_numpy_array(initial_state, name="initial_state")
-        writer, reader = self._client.do_exchange(
+        client = self._client
+        control_session: ControlSession | None = None
+        flight_client_to_close: Any | None = None
+        if self._control_url is not None:
+            control_session = self._launch_control_session()
+            client = self._flight_client_factory(control_session.grpc_address)
+            flight_client_to_close = client
+        if client is None:
+            raise RuntimeError("Flight client is not initialized")
+        writer, reader = client.do_exchange(
             flight.FlightDescriptor.for_command(b"c5r_sim")
         )
         if action_dim is None:
@@ -91,6 +130,8 @@ class C5RSimClient:
             reader=reader,
             request_schema=initial_batch.schema,
             owner=self if self._owns_client else None,
+            flight_client=flight_client_to_close,
+            control_session=control_session,
         )
 
     def close(self) -> None:
@@ -98,6 +139,52 @@ class C5RSimClient:
         close = getattr(self._client, "close", None)
         if close is not None:
             close()
+        if self._owns_http_client:
+            http_close = getattr(self._http_client, "close", None)
+            if http_close is not None:
+                http_close()
+
+    def _launch_control_session(self) -> ControlSession:
+        if self._control_url is None or self._http_client is None:
+            raise RuntimeError("control server is not configured")
+        url = f"{self._control_url}/sessions"
+        try:
+            response = self._http_client.post(url)
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:
+            raise RuntimeError("failed to launch C5R simulation session") from exc
+        session_id = payload.get("session_id")
+        grpc_address = payload.get("grpc_address")
+        if not isinstance(session_id, str) or not session_id:
+            raise RuntimeError("control server response is missing session_id")
+        if not isinstance(grpc_address, str) or not grpc_address:
+            raise RuntimeError("control server response is missing grpc_address")
+        return ControlSession(
+            control_url=self._control_url,
+            session_id=session_id,
+            grpc_address=grpc_address,
+            http_client=self._http_client,
+        )
+
+
+@dataclass
+class ControlSession:
+    control_url: str
+    session_id: str
+    grpc_address: str
+    http_client: Any
+
+    def close(self) -> None:
+        response = self.http_client.delete(
+            f"{self.control_url}/sessions/{self.session_id}"
+        )
+        try:
+            response.raise_for_status()
+        except Exception as exc:
+            raise RuntimeError(
+                f"failed to close C5R simulation session {self.session_id}"
+            ) from exc
 
 
 @dataclass
@@ -110,6 +197,8 @@ class SimulationStream:
     reader: Any
     request_schema: pa.Schema
     owner: C5RSimClient | None = None
+    flight_client: Any | None = None
+    control_session: ControlSession | None = None
     next_step_index: int = 1
     _closed: bool = False
 
@@ -154,7 +243,9 @@ class SimulationStream:
             (self.writer, "done_writing"),
             (self.writer, "close"),
             (self.reader, "close"),
+            (self.flight_client, "close"),
             (self.owner, "close"),
+            (self.control_session, "close"),
         ):
             if target is None:
                 continue

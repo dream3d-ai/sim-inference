@@ -56,6 +56,40 @@ class FakeFlightClient:
         self.closed = True
 
 
+class FakeHttpResponse:
+    def __init__(self, payload: dict[str, object], status_code: int = 200) -> None:
+        self.payload = payload
+        self.status_code = status_code
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            import httpx
+
+            raise httpx.HTTPStatusError(
+                "request failed",
+                request=httpx.Request("POST", "http://control.test/sessions"),
+                response=httpx.Response(self.status_code),
+            )
+
+    def json(self) -> dict[str, object]:
+        return self.payload
+
+
+class FakeHttpClient:
+    def __init__(self, response: FakeHttpResponse) -> None:
+        self.response = response
+        self.posts: list[tuple[str, dict[str, object] | None]] = []
+        self.deletes: list[str] = []
+
+    def post(self, url: str, json: dict[str, object] | None = None):
+        self.posts.append((url, json))
+        return self.response
+
+    def delete(self, url: str):
+        self.deletes.append(url)
+        return FakeHttpResponse({"status": "closed"})
+
+
 def _observation_batch(*, sim_id: str, start: int, rows: int):
     from c5r_sim_inference.protocol import observation_batch_to_record_batch
 
@@ -258,6 +292,80 @@ def test_context_manager_closes_writer_reader_and_client() -> None:
     ):
         pass
 
+    assert flight_client.writer.done
+    assert flight_client.writer.closed
+    assert flight_client.reader.closed
+
+
+def test_start_sim_resolves_grpc_endpoint_from_control_server() -> None:
+    from c5r_sim_inference.client import C5RSimClient
+
+    created_locations: list[str] = []
+    flight_client = FakeFlightClient([_observation_batch(sim_id="sim-1", start=0, rows=1)])
+    http_client = FakeHttpClient(
+        FakeHttpResponse(
+            {
+                "session_id": "session-1",
+                "grpc_address": "grpc://tcp.modal.test:12345",
+                "modal_call_id": "call-session-1",
+                "status": "ready",
+            }
+        )
+    )
+
+    client = C5RSimClient(
+        control_url="http://control.test",
+        http_client=http_client,
+        flight_client_factory=lambda location: (
+            created_locations.append(str(location)) or flight_client
+        ),
+    )
+
+    stream = client.start_sim(
+        task_id="task_11",
+        initial_state=np.zeros(2, dtype=np.float32),
+        views=("overhead",),
+        width=3,
+        height=2,
+        substeps=1,
+    )
+
+    assert stream.sim_id == "sim-1"
+    assert http_client.posts == [("http://control.test/sessions", None)]
+    assert created_locations == ["grpc://tcp.modal.test:12345"]
+
+
+def test_stream_close_requests_control_server_session_delete() -> None:
+    from c5r_sim_inference.client import C5RSimClient
+
+    flight_client = FakeFlightClient([_observation_batch(sim_id="sim-1", start=0, rows=1)])
+    http_client = FakeHttpClient(
+        FakeHttpResponse(
+            {
+                "session_id": "session-1",
+                "grpc_address": "grpc://tcp.modal.test:12345",
+                "modal_call_id": "call-session-1",
+                "status": "ready",
+            }
+        )
+    )
+    client = C5RSimClient(
+        control_url="http://control.test",
+        http_client=http_client,
+        flight_client_factory=lambda location: flight_client,
+    )
+
+    stream = client.start_sim(
+        task_id="task_11",
+        initial_state=np.zeros(2, dtype=np.float32),
+        views=("overhead",),
+        width=3,
+        height=2,
+        substeps=1,
+    )
+    stream.close()
+
+    assert http_client.deletes == ["http://control.test/sessions/session-1"]
     assert flight_client.writer.done
     assert flight_client.writer.closed
     assert flight_client.reader.closed
