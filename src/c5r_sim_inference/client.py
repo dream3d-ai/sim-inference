@@ -53,9 +53,7 @@ class C5RSimClient:
             flight_client
             if flight_client is not None
             else (
-                None
-                if self._control_url is not None
-                else self._flight_client_factory(location)
+                None if self._control_url is not None else self._flight_client_factory(location)
             )
         )
         self._owns_http_client = http_client is None and self._control_url is not None
@@ -111,9 +109,7 @@ class C5RSimClient:
             flight_client_to_close = client
         if client is None:
             raise RuntimeError("Flight client is not initialized")
-        writer, reader = client.do_exchange(
-            flight.FlightDescriptor.for_command(b"c5r_sim")
-        )
+        writer, reader = client.do_exchange(flight.FlightDescriptor.for_command(b"c5r_sim"))
         if action_dim is None:
             if initial_state.ndim != 2:
                 raise ValueError("initial_state must have shape (env, state_dim)")
@@ -189,9 +185,7 @@ class ControlSession:
     http_client: Any
 
     def close(self) -> None:
-        response = self.http_client.delete(
-            f"{self.control_url}/sessions/{self.session_id}"
-        )
+        response = self.http_client.delete(f"{self.control_url}/sessions/{self.session_id}")
         try:
             response.raise_for_status()
         except Exception as exc:
@@ -257,12 +251,9 @@ class SimulationStream:
             (self.writer, "done_writing"),
             (self.writer, "close"),
             (self.reader, "close"),
-<<<<<<< HEAD
             (self.flight_client, "close"),
             (self.owner, "close"),
             (self.control_session, "close"),
-=======
->>>>>>> 5b268b3a85cf43cb77b75f505d85f9a84f4a7b0d
         ):
             if target is None:
                 continue
